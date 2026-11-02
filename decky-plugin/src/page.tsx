@@ -117,8 +117,8 @@ function HistoryTab() {
     setError("");
     getHistory(40, current).then((r) => {
       if (Array.isArray(r)) setRows(r);
-      else { setRows([]); setError((r as any)?.error ?? r?.errors?.[0] ?? ""); }
-    });
+      else { setRows([]); setError((r as any)?.error ?? r?.errors?.[0] ?? "Couldn't read the history"); }
+    }).catch((e) => { setRows([]); setError(`Couldn't read the history: ${e?.message ?? e}`); });
   }, [current]);
   const picker = provs.length > 1 && (
     <Field label="Provider">
@@ -127,7 +127,10 @@ function HistoryTab() {
     </Field>
   );
   if (!provs.length) return <Empty>No provider connected.</Empty>;
-  if (!rows) return <>{picker}<Empty>Loading older versions…</Empty></>;
+  if (!rows) {
+    const name = provs.find((p) => p.id === current)?.name ?? "the provider";
+    return <>{picker}<Empty>Reading older versions from {name}… (a cloud provider can take up to a minute)</Empty></>;
+  }
   if (error) return <>{picker}<Empty>{error}</Empty></>;
   if (!rows.length) return <>{picker}<Empty>No older versions yet. They appear when a save is replaced or deleted.</Empty></>;
   return (
@@ -231,7 +234,8 @@ export function ProvidersTab() {
       </Buttons>
     </Field>
   ) : (
-    <Field key={p.id} label={<span>{p.connected ? "● " : ""}{p.name}</span>} description={providerState(p)}
+    <Field key={p.id} label={<span>{p.connected && <span style={{ color: p.error || p.last_run?.ok === false
+      ? "#e3a35b" : "#59bf40" }}>● </span>}{p.name}</span>} description={providerState(p)}
       bottomSeparator="standard">
       {p.connected ? (
         <DialogButton style={btn} disabled={!!busy} onClick={() => confirm(
