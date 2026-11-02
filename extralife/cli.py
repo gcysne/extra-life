@@ -299,7 +299,7 @@ def cmd_setup(ctx, args):
             return 1
         print("rclone remotes: " + " ".join(remotes))
         name = _ask("Remote to use", remotes[0]).rstrip(":")
-        folder = _ask("Folder in it", "ExtraLife")
+        folder = _ask("Folder for Extra Life in it (everything goes inside)", "ExtraLife").strip("/") or "ExtraLife"
         r.update(type="rclone", remote=f"{name}:{folder}")
     elif choice == "3":
         r.update(type="rsync-ssh", host=_ask("SSH host (as in `ssh HOST`)"), path=_ask("Folder on the host"))

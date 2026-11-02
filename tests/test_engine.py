@@ -312,6 +312,19 @@ class ConfigTests(unittest.TestCase):
                 config_mod.set_key(cfg, "sync.include_states", "maybe")
 
 
+class RemoteFolderTests(unittest.TestCase):
+    def test_remote_root_is_refused(self):
+        from extralife.backends import BackendError
+        with mock.patch.object(rclone_mod, "find_rclone", return_value="/bin/true"):
+            for bad in ("gdrive:", "gdrive:/"):
+                with self.assertRaises(BackendError):
+                    rclone_mod.RcloneBackend(bad)
+            rclone_mod.RcloneBackend("gdrive:ExtraLife")
+        for bad in ("/", str(Path.home())):
+            with self.assertRaises(BackendError):
+                LocalBackend(bad)
+
+
 class ShippedProfilesTests(unittest.TestCase):
     def test_all_shipped_profiles_load(self):
         from extralife import profiles

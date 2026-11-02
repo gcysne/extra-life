@@ -151,14 +151,38 @@ function Content() {
   );
 }
 
+type Unregisterable = { unregister: () => void } | undefined;
+
+/** Steam renames its client API between versions: register through the first name that exists, never throw. */
+function hook(label: string, names: [string, string][], cb: (...args: any[]) => void): Unregisterable {
+  for (const [ns, fn] of names) {
+    const f = (SteamClient as any)?.[ns]?.[fn];
+    if (typeof f !== "function") continue;
+    try {
+      return f.call((SteamClient as any)[ns], cb);
+    } catch (e) {
+      console.error(`[extra-life] ${ns}.${fn} failed`, e);
+    }
+  }
+  console.warn(`[extra-life] no Steam hook for ${label} on this Steam version`);
+  return undefined;
+}
+
+const logErr = (e: unknown) => console.error("[extra-life]", e);
+
 export default definePlugin(() => {
   routerHook.addRoute(PAGE_ROUTE, () => <SavesPage />, { exact: true });
   // Push saves when a game closes; the service waits for the emulator to exit before it reads anything.
-  const lifetime = SteamClient.GameSessions.RegisterForAppLifetimeNotifications((n) => {
-    if (!n.bRunning) gameExited(n.unAppID).catch((e) => console.error("[extra-life]", e));
+  const lifetime = hook("game exit", [["GameSessions", "RegisterForAppLifetimeNotifications"]], (n: any) => {
+    if (n && !n.bRunning) gameExited(n.unAppID).catch(logErr);
   });
-  const resume = SteamClient.System.RegisterForOnResumeFromSuspend(() => {
-    resumed().catch((e) => console.error("[extra-life]", e));
+  // Pull what other devices saved while this one slept.
+  let lastResume = 0;
+  const resume = hook("resume", [["System", "RegisterForOnResumeFromSuspend"],
+    ["User", "RegisterForResumeSuspendedGamesProgress"]], () => {
+    if (Date.now() - lastResume < 60_000) return;   // the progress hook fires several times per wake
+    lastResume = Date.now();
+    resumed().catch(logErr);
   });
 
   return {

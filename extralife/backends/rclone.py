@@ -27,6 +27,9 @@ class RcloneBackend(Backend):
     def __init__(self, remote, binary="", args=()):
         if not remote or ":" not in remote:
             raise BackendError("remote.remote must look like name:folder (e.g. gdrive:ExtraLife)")
+        if not remote.rpartition(":")[2].strip("/"):
+            # Never write into the root of someone's cloud storage: everything goes in one folder.
+            raise BackendError(f"give a folder after the remote name, e.g. {remote.rstrip(':/')}:ExtraLife")
         self.remote = remote
         self.bin = find_rclone(binary)
         if not self.bin:

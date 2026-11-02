@@ -16,6 +16,8 @@ class LocalBackend(Backend):
         if not path:
             raise BackendError("remote.path is not set")
         self.root = Path(os.path.expanduser(path))
+        if self.root == Path(self.root.anchor) or self.root == Path.home():
+            raise BackendError("remote.path must be a folder of its own, e.g. /run/media/<card>/ExtraLife")
         self.rsync = shutil.which("rsync")
 
     def describe(self):
