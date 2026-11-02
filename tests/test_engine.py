@@ -16,7 +16,8 @@ from extralife import config as config_mod, engine as engine_mod, info  # noqa: 
 from extralife.backends.local import LocalBackend  # noqa: E402
 from extralife.backends import rclone as rclone_mod  # noqa: E402
 from extralife.context import Context, Device, Paths  # noqa: E402
-from extralife.engine import Engine, plan_set  # noqa: E402
+from extralife.engine import Engine, plan_set, run_all  # noqa: E402
+from extralife import progress as progress_mod, providers as providers_mod  # noqa: E402
 from extralife.scan import FileInfo, wanted  # noqa: E402
 
 PROFILE = """id = "testemu"
@@ -41,12 +42,16 @@ class Device_:
         paths = Paths(self.dir / "cfg", self.dir / "state", shipped_profiles=prof)
         cfg = config_mod.load(paths.config_file)
         cfg["vars"]["saves"] = str(self.saves)
-        cfg["remote"]["type"] = "test"
+        cfg["providers"]["main"] = {"type": "local", "path": str(root / "remote")}
         self.ctx = Context(paths=paths, cfg=cfg, device=Device(id=name, name=name))
         self.make_backend = make_backend
 
+    def engine(self):
+        prov = providers_mod.Provider("main", "Main", "folder", self.ctx.cfg["providers"]["main"])
+        return Engine(self.ctx, self.make_backend(), provider=prov)
+
     def run(self, mode="sync", **kw):
-        return Engine(self.ctx, self.make_backend()).run(mode, **kw)
+        return self.engine().run(mode, **kw)
 
     def write(self, rel, text, age=0):
         p = self.saves / rel
@@ -101,7 +106,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.ok(self.a.run())["uploaded"], ["g.srm"])
         self.assertEqual(self.ok(self.b.run())["downloaded"], ["g.srm"])
         self.assertEqual(self.b.read("g.srm"), "v2")
-        hist = Engine(self.a.ctx, self.make_backend()).history()
+        hist = self.a.engine().history()
         self.assertEqual(len(hist), 1)
         self.assertEqual(hist[0]["files"][0]["rel"], "g.srm")
         backups = list((self.b.ctx.paths.backup_dir).rglob("g.srm"))
@@ -180,8 +185,8 @@ class EngineTests(unittest.TestCase):
         self.ok(self.a.run())
         self.a.write("g.srm", "v2")
         self.ok(self.a.run())
-        snap = Engine(self.a.ctx, self.make_backend()).history()[0]["id"]
-        r = Engine(self.a.ctx, self.make_backend()).restore(snap, "testemu/saves", "g.srm")
+        snap = self.a.engine().history()[0]["id"]
+        r = self.a.engine().restore(snap, "testemu/saves", "g.srm")
         self.assertTrue(r["ok"], r["errors"])
         self.assertEqual(self.a.read("g.srm"), "v1")
         self.ok(self.b.run())
@@ -302,7 +307,8 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "c.toml"
             cfg = config_mod.load(f)
-            config_mod.set_key(cfg, "remote.path", 'C:\\odd "path"')
+            config_mod.set_key(cfg, "providers.local.type", "local")
+            config_mod.set_key(cfg, "providers.local.path", 'C:\\odd "path"')
             config_mod.set_key(cfg, "sync.include_states", True)
             config_mod.set_key(cfg, "profiles.disabled", "ryujinx, xemu")
             config_mod.save(f, cfg)
@@ -310,6 +316,145 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(again, cfg)
             with self.assertRaises(config_mod.ConfigError):
                 config_mod.set_key(cfg, "sync.include_states", "maybe")
+
+
+    def test_legacy_single_remote_becomes_a_provider(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "c.toml"
+            f.write_text('[remote]\ntype = "rclone"\npath = "/old"\nremote = "gdrive:ExtraLife"\nargs = []\n')
+            cfg = config_mod.load(f)
+            self.assertNotIn("remote", cfg)
+            self.assertEqual(cfg["providers"], {"rclone": {"type": "rclone", "remote": "gdrive:ExtraLife"}})
+
+
+class MultiProviderTests(unittest.TestCase):
+    """Device A syncs with two folders, device B only with the second one."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="extralife-test-"))
+        self.r1, self.r2 = self.tmp / "r1", self.tmp / "r2"
+        self.a = Device_(self.tmp, "deck-a", None)
+        self.b = Device_(self.tmp, "deck-b", None)
+        self.a.ctx.cfg["providers"] = {"local": {"type": "local", "path": str(self.r1)},
+                                       "ssh": {"type": "local", "path": str(self.r2)}}
+        self.b.ctx.cfg["providers"] = {"ssh": {"type": "local", "path": str(self.r2)}}
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def sync(self, dev, mode="sync", **kw):
+        r = run_all(dev.ctx, mode, **kw)
+        self.assertTrue(r["ok"], r["errors"])
+        return r
+
+    def remote_text(self, root, rel):
+        p = root / "data/testemu/saves" / rel
+        return p.read_text() if p.exists() else None
+
+    def test_every_provider_gets_the_saves_and_a_second_pass_spreads_new_ones(self):
+        self.a.write("g.srm", "v1")
+        r = self.sync(self.a)
+        self.assertEqual([p["provider"] for p in r["providers"]], ["local", "ssh"])
+        self.assertEqual((self.remote_text(self.r1, "g.srm"), self.remote_text(self.r2, "g.srm")), ("v1", "v1"))
+        self.sync(self.b)
+        self.b.write("g.srm", "from B")
+        self.sync(self.b)                                   # only r2 has it now
+        r = self.sync(self.a)
+        self.assertEqual(self.a.read("g.srm"), "from B")
+        self.assertEqual(self.remote_text(self.r1, "g.srm"), "from B")     # second pass pushed it to r1
+        self.assertEqual([p.get("pass") for p in r["providers"]], [None, None, 2])
+        self.assertTrue(list((self.r1 / "history").rglob("g.srm")))       # r1's old version was kept
+        again = self.sync(self.a)
+        self.assertEqual(again["summary"], {k: 0 for k in again["summary"]})
+
+    def test_each_provider_has_its_own_state(self):
+        self.a.write("g.srm", "v1")
+        self.sync(self.a)
+        for pid in ("local", "ssh"):
+            self.assertTrue((self.a.ctx.paths.for_provider(pid).base_dir / "testemu__saves.json").exists())
+        self.sync(self.a, providers=["ssh"])
+        self.assertFalse((self.a.ctx.paths.state_dir / "base").exists())
+
+    def test_progress_ends_at_100_and_never_goes_back(self):
+        seen = []
+        orig = progress_mod.Progress._write
+
+        def spy(self_, force=False):
+            seen.append(self_.state["percent"])
+            return orig(self_, force=True)
+        self.a.write("g.srm", "x" * 300000)
+        self.a.write("h.srm", "y")
+        with mock.patch.object(progress_mod.Progress, "_write", spy):
+            self.sync(self.a)
+        self.assertEqual(seen, sorted(seen))
+        self.assertEqual(seen[-1], 100)
+        p = progress_mod.read(self.a.ctx.paths.progress_file)
+        self.assertFalse(p["running"])
+        self.assertTrue(p["ok"])
+        self.assertGreater(len(set(seen)), 4)
+
+    def test_rate_limited_progress_is_written_late_not_dropped(self):
+        f = self.tmp / "progress.json"
+        pr = progress_mod.Progress(f, "sync", 1)
+        pr.provider(0, "x", "X")
+        pr.transfer(5, 10)                      # within the rate limit: not written yet...
+        time.sleep(progress_mod.MIN_WRITE_INTERVAL * 2.5)
+        self.assertGreater(progress_mod.read(f)["percent"], 50)   # ...but a moment later
+        pr.finish(True)
+
+    def test_disconnect_keeps_files_and_state(self):
+        self.a.write("g.srm", "v1")
+        self.sync(self.a)
+        self.a.ctx.paths.config_dir.mkdir(parents=True, exist_ok=True)
+        res = providers_mod.disconnect(self.a.ctx, "local")
+        self.assertFalse(res["removed_login"])
+        self.assertEqual(list(self.a.ctx.cfg["providers"]), ["ssh"])
+        self.assertEqual(self.remote_text(self.r1, "g.srm"), "v1")
+        self.assertTrue(self.a.ctx.paths.for_provider("local").base_dir.is_dir())
+        r = self.sync(self.a)
+        self.assertEqual([p["provider"] for p in r["providers"]], ["ssh"])
+
+    def test_old_single_state_moves_under_the_first_provider(self):
+        from extralife.context import migrate_state
+        root = self.a.ctx.paths.state_dir
+        (root / "base").mkdir(parents=True)
+        (root / "base" / "x.json").write_text("{}")
+        (root / "remote.json").write_text('{"id": "r"}')
+        migrate_state(self.a.ctx)
+        dest = self.a.ctx.paths.for_provider("local").provider_dir
+        self.assertTrue((dest / "base" / "x.json").exists())
+        self.assertTrue((dest / "remote.json").exists())
+        self.assertFalse((root / "base").exists())
+
+
+class UpdateCheckTests(unittest.TestCase):
+    def test_version_order(self):
+        from extralife.util import is_newer
+        self.assertTrue(is_newer("0.1.0", "0.1.0-alpha"))
+        self.assertTrue(is_newer("v0.2.0", "0.1.9"))
+        self.assertTrue(is_newer("0.1.0-alpha.2", "0.1.0-alpha"))
+        self.assertTrue(is_newer("0.1.0-beta", "0.1.0-alpha.9"))
+        self.assertTrue(is_newer("0.10.0", "0.9.0"))
+        self.assertFalse(is_newer("0.1.0-alpha", "0.1.0-alpha"))
+        self.assertFalse(is_newer("0.1.0-alpha", "0.1.0"))
+
+    def test_check_is_cached_and_reports_newer(self):
+        from extralife import update
+        calls = []
+
+        def fake():
+            calls.append(1)
+            return {"tag_name": "v99.0.0", "html_url": "https://example/rel", "body": "notes"}
+        with tempfile.TemporaryDirectory() as d:
+            paths = Paths(Path(d) / "c", Path(d) / "s")
+            r = update.check(paths, fetch=fake)
+            self.assertTrue(r["newer"])
+            self.assertEqual(r["latest"], "99.0.0")
+            self.assertIn("get-release.sh", r["command"])
+            update.check(paths, fetch=fake)
+            self.assertEqual(len(calls), 1)                  # second call answered from the cache
+            update.check(paths, force=True, fetch=fake)
+            self.assertEqual(len(calls), 2)
 
 
 class RemoteFolderTests(unittest.TestCase):

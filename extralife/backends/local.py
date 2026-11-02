@@ -5,7 +5,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .base import Backend, BackendError, check_rel, run
+from .base import Backend, BackendError, check_rel, run, run_stream, rsync_progress
 from ..util import write_text_atomic
 
 
@@ -56,28 +56,36 @@ class LocalBackend(Backend):
         if src.is_dir():
             shutil.copytree(src, dest, dirs_exist_ok=True)
 
-    def _copy_files(self, src_root, dst_root, files):
+    def _copy_files(self, src_root, dst_root, files, progress=None):
         if not files:
             return
         src_root, dst_root = Path(src_root), Path(dst_root)
         dst_root.mkdir(parents=True, exist_ok=True)
         if self.rsync:
             listing = b"\0".join(f.encode() for f in files) + b"\0"
-            run([self.rsync, "-t", "--ignore-times", "--from0", "--files-from=-", "--", f"{src_root}/", f"{dst_root}/"],
-                input=listing)
+            cmd = [self.rsync, "-t", "--ignore-times", "--from0", "--files-from=-"]
+            if progress:
+                run_stream([*cmd, "--info=progress2", "--no-human-readable", "--", f"{src_root}/", f"{dst_root}/"],
+                           input=listing, on_line=rsync_progress(progress))
+            else:
+                run([*cmd, "--", f"{src_root}/", f"{dst_root}/"], input=listing)
             return
-        for f in files:
+        done = 0
+        for i, f in enumerate(files, 1):
             dst = dst_root / f
             dst.parent.mkdir(parents=True, exist_ok=True)
             tmp = dst.with_name(f".extralife-tmp-{dst.name}")
             shutil.copy2(src_root / f, tmp)
             os.replace(tmp, dst)
+            done += dst.stat().st_size
+            if progress:
+                progress(done, i)
 
-    def upload(self, src_root, rel_dir, files):
-        self._copy_files(src_root, self._p(rel_dir), files)
+    def upload(self, src_root, rel_dir, files, progress=None):
+        self._copy_files(src_root, self._p(rel_dir), files, progress)
 
-    def download(self, rel_dir, dest_root, files):
-        self._copy_files(self._p(rel_dir), dest_root, files)
+    def download(self, rel_dir, dest_root, files, progress=None):
+        self._copy_files(self._p(rel_dir), dest_root, files, progress)
 
     def copy(self, src_dir, dst_dir, files):
         present = [f for f in files if (self._p(src_dir) / f).is_file()]

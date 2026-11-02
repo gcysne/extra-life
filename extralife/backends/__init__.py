@@ -1,22 +1,22 @@
 from .base import Backend, BackendError
 
 
-def make_backend(cfg):
-    r = cfg.get("remote", {})
-    kind = r.get("type", "")
-    args = list(r.get("args") or [])
+def make_backend(p):
+    """Backend for one provider's settings (a [providers.<id>] table)."""
+    kind = p.get("type", "")
+    args = list(p.get("args") or [])
     if kind == "local":
         from .local import LocalBackend
-        return LocalBackend(r.get("path", ""))
+        return LocalBackend(p.get("path", ""))
     if kind == "rsync-ssh":
         from .rsync_ssh import RsyncSshBackend
-        return RsyncSshBackend(r.get("host", ""), r.get("path", ""), args)
+        return RsyncSshBackend(p.get("host", ""), p.get("path", ""), args)
     if kind == "rclone":
         from .rclone import RcloneBackend
-        return RcloneBackend(r.get("remote", ""), r.get("rclone", ""), args)
+        return RcloneBackend(p.get("remote", ""), p.get("rclone", ""), args, p.get("rclone_config", ""))
     if not kind:
-        raise BackendError("no remote configured; run `extralife setup`")
-    raise BackendError(f"unknown remote type: {kind} (local, rsync-ssh or rclone)")
+        raise BackendError("provider has no type")
+    raise BackendError(f"unknown provider type: {kind} (local, rsync-ssh or rclone)")
 
 
 __all__ = ["Backend", "BackendError", "make_backend"]

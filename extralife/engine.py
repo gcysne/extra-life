@@ -11,6 +11,10 @@ deleted is kept under history/, a local file that gets replaced or deleted is co
 Modes: "sync" (both ways), "push" (force: upload every local file that differs, the cloud copy goes to history)
 and "pull" (force: download every remote file that differs, the local copy goes to the backup folder). Forced
 modes never delete files on the other side.
+
+Several providers can be connected; run_all() syncs with each in turn, and every provider has its own base (the
+three-way compare is per provider). When a later provider brought new saves, the earlier ones get a second pass so
+all of them end up with the same files.
 """
 
 import fcntl
@@ -24,8 +28,9 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 
-from . import REMOTE_FORMAT, profiles as profiles_mod, procs
-from .backends import BackendError, make_backend
+from . import REMOTE_FORMAT, profiles as profiles_mod, procs, providers as providers_mod
+from .backends import BackendError
+from .progress import FILE_COST, NullProgress, Progress
 from .scan import scan, sha256_file
 from .util import iso, parse_iso, parse_stamp, read_json, slug, stamp, utcnow, write_json
 
@@ -53,6 +58,19 @@ class Plan:
 
     def empty(self):
         return not (self.uploads or self.downloads or self.remote_deletes or self.local_deletes)
+
+
+@dataclass
+class _Prepared:
+    """One save folder after comparing, before transferring."""
+    s: object
+    r: dict
+    start: int = 0          # progress weight of the sets before this one
+    weight: int = 0         # progress weight of this set's transfers
+    plan: Plan = None
+    local: dict = None
+    remote: dict = None
+    base: dict = None
 
 
 def plan_set(local, remote, base, mode="sync", propagate_deletes=True, only=None):
@@ -99,12 +117,95 @@ def plan_set(local, remote, base, mode="sync", propagate_deletes=True, only=None
     return plan
 
 
+def select_sets(ctx, report, only_profiles=None, only_set=None):
+    errors = []
+    sets = profiles_mod.resolve(ctx, errors, only=only_profiles)
+    if only_set:
+        sets = [s for s in sets if s.key == only_set]
+        if not sets:
+            raise EngineError(f"{only_set}: no such save folder on this device")
+    report.setdefault("warnings", []).extend(errors)
+    return sets
+
+
+def wait_for_emulators(sets, wait):
+    deadline = time.monotonic() + wait
+    procs_needed = {p for s in sets for p in s.processes}
+    while procs_needed and procs.is_running(procs_needed) and time.monotonic() < deadline:
+        time.sleep(2)
+
+
+SUMMARY_KEYS = ("uploaded", "downloaded", "remote_deleted", "local_deleted", "conflicts")
+
+
+def run_all(ctx, mode="sync", providers=None, only_profiles=None, only_rels=None, only_set=None, dry_run=False,
+            wait=0, lock_wait=0):
+    """Sync with every connected provider (or the ones listed in `providers`), under one local lock."""
+    provs = providers_mod.connected(ctx, only=providers)
+    report = {"mode": mode, "device": ctx.device.name, "started": iso(), "dry_run": dry_run, "providers": [],
+              "errors": [], "warnings": [], "ok": False}
+    if not provs:
+        report["errors"].append("no storage provider connected" if not providers else
+                                f"not connected: {', '.join(providers)}")
+        report["not_configured"] = not ctx.configured
+        return report
+    holder = Engine(ctx)
+    holder._local_lock(lock_wait)                # Busy goes to the caller
+    progress = NullProgress() if dry_run else Progress(ctx.paths.progress_file, mode, len(provs))
+    try:
+        try:
+            sets = select_sets(ctx, report, only_profiles, only_set)
+        except EngineError as e:
+            report["errors"].append(str(e))
+            return report
+        if wait and mode != "push":
+            wait_for_emulators(sets, wait)
+        runs = []
+
+        def one(i, p):
+            progress.provider(i, p.id, p.name)
+            r = Engine(ctx, provider=p, progress=progress).run(
+                mode, only_rels=only_rels, dry_run=dry_run, lock=False, sets=sets)
+            runs.append(r)
+            return r
+
+        firsts = [one(i, p) for i, p in enumerate(provs)]
+        if mode == "sync" and not dry_run:
+            # A later provider brought saves the earlier ones don't have yet: give those a second pass.
+            brought = [i for i, r in enumerate(firsts) if i > 0 and r["ok"] and any(
+                s.get("downloaded") or s.get("local_deleted") for s in r["sets"])]
+            if brought:
+                for i in range(max(brought)):
+                    one(len(provs) - 1, provs[i])["pass"] = 2
+        report["providers"] = runs
+        for r in runs:
+            report["errors"] += [f"{r['provider_name']}: {e}" for e in r["errors"]]
+            report["warnings"] += [w for w in r.get("warnings", []) if w not in report["warnings"]]
+        report["summary"] = {k: sum(len(s.get(k, [])) for r in runs for s in r["sets"]) for k in SUMMARY_KEYS}
+        skipped = {}
+        for r in runs:
+            for s in r["sets"]:
+                if s.get("skipped"):
+                    skipped[s["key"]] = s["skipped"]
+        report["skipped"] = [{"key": k, "reason": v} for k, v in skipped.items()]
+        report["ok"] = not report["errors"]
+    finally:
+        report["finished"] = iso()
+        if not dry_run:
+            write_json(ctx.paths.last_run_file, report)
+        progress.finish(report["ok"])
+        holder._local_unlock()
+    return report
+
+
 class Engine:
-    def __init__(self, ctx, backend=None, log=None):
+    def __init__(self, ctx, backend=None, log=None, provider=None, progress=None):
         self.ctx = ctx
-        self.paths = ctx.paths
+        self.provider = provider
+        self.paths = ctx.paths.for_provider(provider.id) if provider else ctx.paths
         self.backend = backend
         self.log = log or (lambda msg: None)
+        self.progress = progress or NullProgress()
         self._lock_fd = None
 
     # ---------- locks ----------
@@ -233,38 +334,53 @@ class Engine:
     # ---------- main entry ----------
 
     def run(self, mode="sync", only_profiles=None, only_rels=None, only_set=None, dry_run=False, wait=0,
-            lock_wait=0):
+            lock_wait=0, lock=True, sets=None):
+        """Sync this device with one provider. run_all() calls this for every connected provider."""
         if mode not in ("sync", "push", "pull"):
             raise ValueError(mode)
         report = {"mode": mode, "device": self.ctx.device.name, "started": iso(), "dry_run": dry_run,
+                  "provider": self.provider.id if self.provider else "",
+                  "provider_name": self.provider.name if self.provider else "",
                   "sets": [], "errors": [], "ok": False}
-        self._local_lock(lock_wait)
+        if lock:
+            self._local_lock(lock_wait)
         try:
             if self.backend is None:
-                self.backend = make_backend(self.ctx.cfg)
+                self.backend = self._make_backend()
             report["remote"] = self.backend.describe()
-            errors = []
-            sets = profiles_mod.resolve(self.ctx, errors, only=only_profiles)
-            if only_set:
-                sets = [s for s in sets if s.key == only_set]
-                if not sets:
-                    raise EngineError(f"{only_set}: no such save folder on this device")
-            report.setdefault("warnings", []).extend(errors)
-            if wait and mode != "push":
-                self._wait_for_emulators(sets, wait)
+            if sets is None:
+                sets = select_sets(self.ctx, report, only_profiles, only_set)
+                if wait and mode != "push":
+                    wait_for_emulators(sets, wait)
             self.backend.check()
+            self.progress.connecting(1, 4)
             remote_id = self._check_format(dry_run)
+            self.progress.connecting(2, 4)
             self._fresh_base = (read_json(self.paths.remote_file, {}) or {}).get("id") != remote_id
             if not dry_run:
                 self._bind_remote(remote_id, report)
                 self._remote_lock()
+            self.progress.connecting(3, 4)
             try:
                 snap = f"{stamp()}_{slug(self.ctx.device.name)}"
                 with tempfile.TemporaryDirectory(dir=self._tmp_root()) as tmp:
                     tmp = Path(tmp)
                     self.backend.fetch_tree("manifests", tmp / "manifests")
-                    for s in sets:
-                        report["sets"].append(self._run_set(s, mode, tmp, snap, only_rels, dry_run))
+                    self.progress.connected()
+                    self._weight_acc = 0
+                    prepared = []
+                    for i, s in enumerate(sets):
+                        self.progress.comparing(i, len(sets), s.profile_name)
+                        prepared.append(self._prepare_set(s, mode, tmp, only_rels))
+                    self._total = sum(p.weight for p in prepared)
+                    self._done = 0
+                    self.progress.transfer(0, self._total)
+                    for p in prepared:
+                        if not dry_run and p.plan is not None and not p.r.get("error"):
+                            self._finish_set(p, mode, snap, tmp, only_rels)
+                        self._done = p.start + p.weight
+                        self.progress.transfer(self._done, self._total)
+                        report["sets"].append(p.r)
                 if not dry_run:
                     self._touch_device()
                     self._maybe_prune(report)
@@ -280,28 +396,33 @@ class Engine:
             report["finished"] = iso()
             if not dry_run:
                 self._finish(report)
-            self._local_unlock()
+            if lock:
+                self._local_unlock()
         return report
+
+    def _make_backend(self):
+        if self.provider is not None:
+            return self.provider.backend()
+        provs = providers_mod.connected(self.ctx)
+        if not provs:
+            raise BackendError("no storage provider connected; run `extralife setup`")
+        self.provider = provs[0]
+        self.paths = self.ctx.paths.for_provider(self.provider.id)
+        return self.provider.backend()
 
     def _tmp_root(self):
         self.paths.tmp_dir.mkdir(parents=True, exist_ok=True)
         return self.paths.tmp_dir
 
-    def _wait_for_emulators(self, sets, wait):
-        deadline = time.monotonic() + wait
-        procs_needed = {p for s in sets for p in s.processes}
-        while procs_needed and procs.is_running(procs_needed) and time.monotonic() < deadline:
-            time.sleep(2)
-
-    def _run_set(self, s, mode, tmp, snap, only_rels, dry_run):
+    def _prepare_set(self, s, mode, tmp, only_rels):
         r = {"key": s.key, "name": s.profile_name, "kind": s.kind, "uploaded": [], "downloaded": [],
              "remote_deleted": [], "local_deleted": [], "conflicts": [], "skipped": ""}
+        prep = _Prepared(s=s, r=r, start=getattr(self, "_weight_acc", 0))
         if mode != "push" and procs.is_running(s.processes):
             r["skipped"] = "emulator is running"
-            return r
+            return prep
         try:
-            manifest_rel = f"manifests/{s.key}.json"
-            mf = read_json(tmp / manifest_rel, {}) or {}
+            mf = read_json(tmp / f"manifests/{s.key}.json", {}) or {}
             remote = mf.get("files", {})
             base = {} if getattr(self, "_fresh_base", False) else self.load_base(s.key)
             if not mf and base:
@@ -314,11 +435,23 @@ class Engine:
                             set(only_rels) if only_rels else None)
             r.update(uploaded=plan.uploads, downloaded=plan.downloads, remote_deleted=plan.remote_deletes,
                      local_deleted=plan.local_deletes, conflicts=plan.conflicts)
-            if dry_run:
-                return r
-            new_remote = self._apply(s, plan, local, remote, snap, tmp, r)
+            prep.plan, prep.local, prep.remote, prep.base = plan, local, remote, base
+            if not plan.empty():
+                prep.weight = (sum(local[f].size + FILE_COST for f in plan.uploads)
+                               + sum(int(remote[f].get("size") or 0) + FILE_COST for f in plan.downloads)
+                               + FILE_COST * (len([f for f in plan.uploads if f in remote])
+                                              + len(plan.remote_deletes) + 1))
+        except (BackendError, EngineError, OSError) as e:
+            r["error"] = str(e)
+        self._weight_acc = prep.start + prep.weight
+        return prep
+
+    def _finish_set(self, p, mode, snap, tmp, only_rels):
+        s, r, plan, local, remote, base = p.s, p.r, p.plan, p.local, p.remote, p.base
+        try:
+            new_remote = self._apply(p, snap, tmp)
             if new_remote != remote:
-                self.backend.write_text(manifest_rel, json.dumps(
+                self.backend.write_text(f"manifests/{s.key}.json", json.dumps(
                     {"set": s.key, "files": new_remote, "updated": iso(), "device": self.ctx.device.name},
                     indent=0, sort_keys=True) + "\n")
             new_base = dict(new_remote)
@@ -331,22 +464,39 @@ class Engine:
             self._update_conflicts(s, mode, plan, local, remote, only_rels)
         except (BackendError, EngineError, OSError) as e:
             r["error"] = str(e)
-        return r
 
-    def _apply(self, s, plan, local, remote, snap, tmp, r):
+    def _step(self, p, cost):
+        """Progress callback for one transfer of `cost` bytes-equivalent inside set p."""
+        base = self._done
+
+        def cb(nbytes, nfiles):
+            self.progress.transfer(base + min(cost, nbytes + nfiles * FILE_COST), self._total, p.s.profile_name)
+        return cb
+
+    def _advance(self, p, cost):
+        self._done += cost
+        self.progress.transfer(self._done, self._total, p.s.profile_name)
+
+    def _apply(self, p, snap, tmp):
+        s, plan, local, remote, r = p.s, p.plan, p.local, p.remote, p.r
         b, dev, now = self.backend, self.ctx.device, iso()
         data_dir, hist_dir = f"data/{s.key}", f"history/{snap}/{s.key}"
         new_remote = dict(remote)
         events = []
+        self._done = p.start
+        prov = self.provider.id if self.provider else ""
 
         def ev(action, rel, size=None, **extra):
             events.append({"time": now, "device": dev.name, "action": action, "key": s.key, "name": s.profile_name,
-                           "rel": rel, "size": size, **extra})
+                           "rel": rel, "size": size, "provider": prov, **extra})
 
         if plan.uploads:
             replaced = [f for f in plan.uploads if f in remote]
             b.copy(data_dir, hist_dir, replaced)
-            b.upload(s.root, data_dir, plan.uploads)
+            self._advance(p, FILE_COST * len(replaced))
+            cost = sum(local[f].size + FILE_COST for f in plan.uploads)
+            b.upload(s.root, data_dir, plan.uploads, progress=self._step(p, cost))
+            self._advance(p, cost)
             for f in plan.uploads:
                 li = local[f]
                 new_remote[f] = {"sha256": li.sha256, "size": li.size, "mtime_ns": li.mtime_ns,
@@ -354,13 +504,16 @@ class Engine:
                 ev("upload", f, li.size)
         if plan.remote_deletes:
             b.move(data_dir, hist_dir, plan.remote_deletes)
+            self._advance(p, FILE_COST * len(plan.remote_deletes))
             for f in plan.remote_deletes:
                 new_remote.pop(f, None)
                 ev("remote_delete", f)
         backup = self.paths.backup_dir / snap / s.key
         if plan.downloads:
             staging = tmp / "download" / s.key
-            b.download(data_dir, staging, plan.downloads)
+            cost = sum(int(remote[f].get("size") or 0) + FILE_COST for f in plan.downloads)
+            b.download(data_dir, staging, plan.downloads, progress=self._step(p, cost))
+            self._advance(p, cost)
             failed = []
             for f in plan.downloads:
                 entry = remote[f]
@@ -415,8 +568,7 @@ class Engine:
             {"id": dev.id, "name": dev.name, "last_sync": iso()}, indent=1) + "\n")
 
     def _finish(self, report):
-        summary = {k: sum(len(s.get(k, [])) for s in report["sets"])
-                   for k in ("uploaded", "downloaded", "remote_deleted", "local_deleted", "conflicts")}
+        summary = {k: sum(len(s.get(k, [])) for s in report["sets"]) for k in SUMMARY_KEYS}
         report["summary"] = summary
         write_json(self.paths.last_run_file, report)
 
@@ -454,7 +606,7 @@ class Engine:
 
     def history(self, limit=50):
         if self.backend is None:
-            self.backend = make_backend(self.ctx.cfg)
+            self.backend = self._make_backend()
         snaps = {}
         for rel, size in self.backend.list_files("history"):
             name, _, rest = rel.partition("/")
@@ -469,10 +621,11 @@ class Engine:
                         "files": snaps[name]})
         return out
 
-    def restore(self, snapshot, key, rel):
-        """Put an older version from history back in place on this device, then push it as the newest."""
+    def restore(self, snapshot, key, rel, push=True):
+        """Put an older version from this provider's history back in place on this device, then push it as the
+        newest (push=False: the caller pushes it, e.g. to every provider)."""
         if self.backend is None:
-            self.backend = make_backend(self.ctx.cfg)
+            self.backend = self._make_backend()
         sets = {s.key: s for s in profiles_mod.resolve(self.ctx)}
         s = sets.get(key)
         if not s:
@@ -494,7 +647,10 @@ class Engine:
         finally:
             self._local_unlock()
         self._events([{"time": iso(), "device": self.ctx.device.name, "action": "restore", "key": key,
-                       "name": s.profile_name, "rel": rel, "size": None, "snapshot": snapshot}])
+                       "name": s.profile_name, "rel": rel, "size": None, "snapshot": snapshot,
+                       "provider": self.provider.id if self.provider else ""}])
+        if not push:
+            return {"ok": True, "errors": [], "sets": []}
         return self.run("push", only_set=key, only_rels=[rel])
 
 

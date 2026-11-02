@@ -6,12 +6,14 @@ command rewrites the file without comments). See the current values with `extral
 | Key | Default | Meaning |
 |---|---|---|
 | `device_name` | host name | shown in the history and in "saved on" |
-| `remote.type` | | `local`, `rclone` or `rsync-ssh` ([backends.md](backends.md)) |
-| `remote.path` | | folder (`local`) or folder on the host (`rsync-ssh`) |
-| `remote.remote` | | rclone `remote:folder` |
-| `remote.host` | | ssh host (`rsync-ssh`) |
-| `remote.rclone` | bundled, then PATH | rclone binary |
-| `remote.args` | `[]` | extra rclone or ssh arguments, e.g. `["--bwlimit", "2M"]` |
+| `[providers.<id>]` | | one table per connected provider ([backends.md](backends.md)); written by `provider connect` |
+| `providers.<id>.type` | | `local`, `rclone` or `rsync-ssh` |
+| `providers.<id>.path` | | folder (`local`) or folder on the host (`rsync-ssh`) |
+| `providers.<id>.remote` | | rclone `remote:folder` |
+| `providers.<id>.rclone_config` | rclone's own | rclone.conf holding the sign-in (sign-in providers: `~/.config/extra-life/rclone.conf`) |
+| `providers.<id>.host` | | ssh host (`rsync-ssh`) |
+| `providers.<id>.rclone` | bundled, then PATH | rclone binary |
+| `providers.<id>.args` | `[]` | extra rclone or ssh arguments, e.g. `["--bwlimit", "2M"]` |
 | `sync.on_game_exit` | `true` | sync when a game closes (needs the Decky plugin) |
 | `sync.include_states` | `false` | also sync save states |
 | `sync.propagate_deletes` | `true` | a save deleted on one device is removed on the others (kept in history/backup) |
@@ -22,6 +24,10 @@ command rewrites the file without comments). See the current values with `extral
 | `profiles.disabled` | `[]` | ids never synced |
 | `[vars]` | | your own path variables for profiles |
 
-The periodic sync is the systemd timer `extralife-sync.timer` (after login, then every 30 minutes):
-`systemctl --user disable --now extralife-sync.timer` turns it off (also a toggle in the plugin). To change the
+Settings from 0.1.0-alpha (a single `[remote]` table) are read as one provider and rewritten in the new form the
+next time a setting changes.
+
+The periodic sync is the systemd timer `extralife-sync.timer` (after login, then every 30 minutes). It is **off by
+default** (syncs happen when a game closes): turn it on with the plugin's "Sync every 30 minutes" toggle or
+`systemctl --user enable --now extralife-sync.timer`, off with `disable --now`. Reinstalling keeps your choice. To change the
 interval: `systemctl --user edit extralife-sync.timer` and set `OnUnitActiveSec=`.

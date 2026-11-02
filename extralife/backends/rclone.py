@@ -7,7 +7,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .base import Backend, BackendError, check_rel, run
+from .base import Backend, BackendError, check_rel, run, run_stream
 
 # rclone exit codes: 3 = directory not found, 4 = file not found
 MISSING = (3, 4)
@@ -24,7 +24,7 @@ def find_rclone(configured=""):
 class RcloneBackend(Backend):
     kind = "rclone"
 
-    def __init__(self, remote, binary="", args=()):
+    def __init__(self, remote, binary="", args=(), config=""):
         if not remote or ":" not in remote:
             raise BackendError("remote.remote must look like name:folder (e.g. gdrive:ExtraLife)")
         if not remote.rpartition(":")[2].strip("/"):
@@ -35,6 +35,9 @@ class RcloneBackend(Backend):
         if not self.bin:
             raise BackendError("rclone not found; run `extralife install-rclone`")
         self.flags = ["--retries", "3", "--low-level-retries", "10", "--log-level", "ERROR", *args]
+        if config:
+            # Sign-ins made through Extra Life live in its own rclone.conf.
+            self.flags = ["--config", os.path.expanduser(config), *self.flags]
 
     def describe(self):
         return f"rclone {self.remote}"
@@ -72,16 +75,34 @@ class RcloneBackend(Backend):
     def _list(self, files):
         return ("\n".join(files) + "\n").encode("utf-8")
 
-    def upload(self, src_root, rel_dir, files):
-        if files:
-            self._rc("copy", str(src_root), self._p(rel_dir), "--files-from-raw", "-", "--no-traverse", "--ignore-times",
-                     input=self._list(files))
+    def _transfer(self, src, dst, files, progress):
+        args = ["copy", src, dst, "--files-from-raw", "-", "--no-traverse", "--ignore-times"]
+        if not progress:
+            self._rc(*args, input=self._list(files))
+            return
 
-    def download(self, rel_dir, dest_root, files):
+        def on_line(line):
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                return False
+            st = obj.get("stats")
+            if st is None:
+                return False         # a real error message: keep it for the error report
+            progress(int(st.get("bytes", 0)), int(st.get("transfers", 0)))
+            return True
+
+        run_stream([self.bin, *args, *self.flags, "--stats", "1s", "--stats-log-level", "ERROR", "--use-json-log"],
+                   input=self._list(files), on_line=on_line)
+
+    def upload(self, src_root, rel_dir, files, progress=None):
+        if files:
+            self._transfer(str(src_root), self._p(rel_dir), files, progress)
+
+    def download(self, rel_dir, dest_root, files, progress=None):
         if files:
             Path(dest_root).mkdir(parents=True, exist_ok=True)
-            self._rc("copy", self._p(rel_dir), str(dest_root), "--files-from-raw", "-", "--no-traverse", "--ignore-times",
-                     input=self._list(files))
+            self._transfer(self._p(rel_dir), str(dest_root), files, progress)
 
     def copy(self, src_dir, dst_dir, files):
         if files:

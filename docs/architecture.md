@@ -7,7 +7,7 @@ Decky plugin (Game Mode) ──game closed / resumed──▶ systemctl --user s
        │                                                        │
        └── extralife <command> --json ──┐                       ▼
                                         ├──▶ extralife (Python) ──▶ backend (folder | rsync-ssh | rclone)
-systemd timer (boot + every 30 min) ────┘
+systemd timer (optional, off by default) ┘
 ```
 
 There is no long-running daemon: every sync is one run of `extralife`, started by the systemd user service (timer,
@@ -23,7 +23,9 @@ identified by `profile/set` (e.g. `ryujinx/saves`), not by its local path.
 ## Sync rules
 
 For every file Extra Life compares three SHA-256 hashes: the file here, the file in the remote manifest, and the
-remote manifest as this device left it after its last sync (the *base*, in `~/.local/state/extra-life/base/`).
+remote manifest as this device left it after its last sync (the *base*, in
+`~/.local/state/extra-life/providers/<id>/base/`, one per provider: with several providers connected, each is
+compared and synced in turn, see [backends.md](backends.md#how-several-providers-stay-the-same)).
 
 | Here vs base | Remote vs base | Result |
 |---|---|---|
@@ -65,5 +67,14 @@ history/<UTC stamp>_<device>/<profile>/<set>/<file>   versions replaced or delet
 |---|---|
 | `~/.config/extra-life/config.toml` | settings |
 | `~/.config/extra-life/profiles/` | your own profiles (override shipped ones with the same id) |
-| `~/.local/state/extra-life/` | base manifests, hash cache, conflicts, last run, activity log, backups |
+| `~/.local/state/extra-life/` | hash cache, last run, activity log, backups, `progress.json`; per provider (`providers/<id>/`): base manifests, conflicts, last run |
 | `~/.local/share/extra-life/bin/rclone` | rclone downloaded by `extralife install-rclone` |
+
+## Progress
+
+While a sync runs, `~/.local/state/extra-life/progress.json` holds its progress (percent, provider, phase, emulator;
+`extralife progress` prints it). Each provider is an equal share of the run. Inside one provider: connecting and
+reading the manifests (8%), comparing every save folder (to 25%), then the transfers, weighted by bytes plus a fixed
+cost per file, with live byte counts from rclone (`--stats`) and rsync (`--info=progress2`). The percentage never
+goes backwards. The Decky plugin shows it as a bar in its panel and as an icon in Steam's status bar that disappears
+when the sync ends.

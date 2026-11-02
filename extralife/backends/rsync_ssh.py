@@ -4,7 +4,7 @@ rsync, sh, find and stat on the host. Status: written against POSIX tools, not y
 import shlex
 import shutil
 
-from .base import Backend, BackendError, check_rel, run
+from .base import Backend, BackendError, check_rel, run, run_stream, rsync_progress
 
 NOT_FOUND = 44
 
@@ -28,10 +28,14 @@ class RsyncSshBackend(Backend):
     def _sh(self, script, input=None, ok=(0,)):
         return run([*self.ssh, self.host, "sh", "-c", shlex.quote(script)], input=input, ok=ok)
 
-    def _rsync(self, src, dst, files):
+    def _rsync(self, src, dst, files, progress=None):
         listing = b"\0".join(f.encode() for f in files) + b"\0"
-        run([self.rsync, "-t", "--ignore-times", "--from0", "--files-from=-", "-e", shlex.join(self.ssh), "--", src, dst],
-            input=listing)
+        cmd = [self.rsync, "-t", "--ignore-times", "--from0", "--files-from=-", "-e", shlex.join(self.ssh)]
+        if progress:
+            run_stream([*cmd, "--info=progress2", "--no-human-readable", "--", src, dst], input=listing,
+                       on_line=rsync_progress(progress))
+        else:
+            run([*cmd, "--", src, dst], input=listing)
 
     def check(self):
         self._sh(f"mkdir -p {shlex.quote(self.root)}")
@@ -57,15 +61,15 @@ class RsyncSshBackend(Backend):
         dest.mkdir(parents=True, exist_ok=True)
         run([self.rsync, "-rt", "-e", shlex.join(self.ssh), "--", f"{self.host}:{self._p(rel)}/", f"{dest}/"])
 
-    def upload(self, src_root, rel_dir, files):
+    def upload(self, src_root, rel_dir, files, progress=None):
         if files:
             self._sh(f"mkdir -p {shlex.quote(self._p(rel_dir))}")
-            self._rsync(f"{src_root}/", f"{self.host}:{self._p(rel_dir)}/", files)
+            self._rsync(f"{src_root}/", f"{self.host}:{self._p(rel_dir)}/", files, progress)
 
-    def download(self, rel_dir, dest_root, files):
+    def download(self, rel_dir, dest_root, files, progress=None):
         if files:
             dest_root.mkdir(parents=True, exist_ok=True)
-            self._rsync(f"{self.host}:{self._p(rel_dir)}/", f"{dest_root}/", files)
+            self._rsync(f"{self.host}:{self._p(rel_dir)}/", f"{dest_root}/", files, progress)
 
     def _each(self, verb, src_dir, dst_dir, files):
         lines = []

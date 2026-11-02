@@ -11,6 +11,7 @@ Layout on the remote (see docs/architecture.md):
 
 import os
 import subprocess
+import threading
 
 
 class BackendError(Exception):
@@ -48,6 +49,77 @@ def run(cmd, input=None, timeout=600, ok=(0,)):
     return p
 
 
+def run_stream(cmd, input=None, timeout=900, ok=(0,), on_line=None, split=b"\n"):
+    """Like run(), but hands every output line (stdout and stderr, split on newlines or carriage returns) to
+    on_line(text) while the command runs; used for transfer progress. Returns the exit code."""
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env=clean_env())
+    except FileNotFoundError as e:
+        raise BackendError(f"{cmd[0]} not found") from e
+    tail = []
+
+    def pump(stream, keep):
+        buf = b""
+        while True:
+            chunk = stream.read1(65536) if hasattr(stream, "read1") else stream.read(4096)
+            if not chunk:
+                break
+            buf += chunk.replace(b"\r", b"\n")
+            *lines, buf = buf.split(b"\n")
+            for raw in lines:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                handled = False
+                if on_line:
+                    try:
+                        handled = on_line(line)
+                    except Exception:     # progress is cosmetic; never fail a transfer over it
+                        pass
+                if keep and not handled:
+                    tail.append(line)
+                    del tail[:-3]
+
+    threads = [threading.Thread(target=pump, args=(p.stdout, False), daemon=True),
+               threading.Thread(target=pump, args=(p.stderr, True), daemon=True)]
+    for t in threads:
+        t.start()
+    try:
+        if input:
+            p.stdin.write(input)
+        p.stdin.close()
+    except BrokenPipeError:
+        pass
+    try:
+        p.wait(timeout)
+    except subprocess.TimeoutExpired as e:
+        p.kill()
+        p.wait()
+        raise BackendError(f"{os.path.basename(cmd[0])} timed out after {timeout}s") from e
+    for t in threads:
+        t.join(5)
+    p.stdout.close()
+    p.stderr.close()
+    if p.returncode not in ok:
+        raise BackendError(f"{os.path.basename(cmd[0])} failed ({p.returncode}): {' | '.join(tail[-3:])}")
+    return p.returncode
+
+
+def rsync_progress(progress):
+    """Line handler for rsync --info=progress2 --no-human-readable: "  1234567  45%  1.2MB/s  0:00:01 (xfr#3, ...)"."""
+    import re
+    pat = re.compile(r"^(\d+)\s+\d+%(?:.*xfr#(\d+))?")
+
+    def on_line(line):
+        m = pat.match(line)
+        if not m:
+            return False
+        progress(int(m.group(1)), int(m.group(2) or 0))
+        return True
+    return on_line
+
+
 class Backend:
     kind = ""
 
@@ -73,10 +145,11 @@ class Backend:
         """Copy a remote folder into the local folder dest (missing remote folder = nothing)."""
         raise NotImplementedError
 
-    def upload(self, src_root, rel_dir, files):
+    def upload(self, src_root, rel_dir, files, progress=None):
+        """progress(bytes_done, files_done) may be called while it runs (both counted from the start of this call)."""
         raise NotImplementedError
 
-    def download(self, rel_dir, dest_root, files):
+    def download(self, rel_dir, dest_root, files, progress=None):
         raise NotImplementedError
 
     def copy(self, src_dir, dst_dir, files):

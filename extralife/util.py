@@ -76,3 +76,23 @@ def human_size(n):
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
         n /= 1024
     return f"{n:.1f} GB"
+
+
+def version_key(text):
+    """Sort key for versions like 1.2.3, v1.2.3, 0.1.0-alpha, 0.1.0-alpha.2 (semver order: a release sorts after
+    its pre-releases; numeric pre-release parts compare as numbers)."""
+    text = str(text or "").strip().lstrip("vV")
+    main, _, pre = text.partition("-")
+    nums = []
+    for part in main.split("."):
+        m = re.match(r"\d+", part)
+        nums.append(int(m.group()) if m else 0)
+    nums = (nums + [0, 0, 0])[:3]
+    if not pre:
+        return (*nums, 1, ())
+    ids = tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in pre.split("."))
+    return (*nums, 0, ids)
+
+
+def is_newer(candidate, current):
+    return version_key(candidate) > version_key(current)

@@ -1,7 +1,7 @@
 """config.toml: load with defaults, change single keys, write back.
 
-The file only holds top-level scalars and one level of tables with scalars or string lists, so a tiny writer is
-enough (comments are not preserved when the CLI or the plugin changes a value).
+The file only holds top-level scalars, tables of scalars or string lists, and [providers.<id>] tables, so a tiny
+writer is enough (comments are not preserved when the CLI or the plugin changes a value).
 """
 
 import copy
@@ -12,14 +12,12 @@ from .util import write_text_atomic
 
 DEFAULTS = {
     "device_name": "",
-    "remote": {
-        "type": "",          # local | rsync-ssh | rclone
-        "path": "",          # local: folder; rsync-ssh: folder on the host
-        "host": "",          # rsync-ssh: [user@]host as ssh knows it
-        "remote": "",        # rclone: remote:folder, e.g. gdrive:ExtraLife
-        "rclone": "",        # rclone binary (default: bundled copy, then PATH)
-        "args": [],          # extra rclone or ssh arguments
-    },
+    # Every connected storage provider; each sync runs against all of them. One table per provider id:
+    #   type = "local" | "rsync-ssh" | "rclone"
+    #   path = folder (local) or folder on the host (rsync-ssh); host = [user@]host (rsync-ssh)
+    #   remote = "name:folder" (rclone); rclone_config = rclone.conf that holds the sign-in ("" = rclone's own)
+    #   rclone = rclone binary; args = extra rclone or ssh arguments
+    "providers": {},
     "sync": {
         "on_game_exit": True,
         "include_states": False,
@@ -49,6 +47,21 @@ def _merge(base, extra):
     return base
 
 
+LEGACY_IDS = {"local": "local", "rsync-ssh": "ssh", "rclone": "rclone"}
+
+
+def migrate(data):
+    """0.1.0-alpha had one [remote] table; it becomes one provider."""
+    old = data.pop("remote", None)
+    if isinstance(old, dict) and old.get("type") and not data.get("providers"):
+        kind = old["type"]
+        keep = {"local": ("path",), "rsync-ssh": ("host", "path", "args"),
+                "rclone": ("remote", "rclone", "args")}.get(kind, ())
+        prov = {"type": kind, **{k: old[k] for k in keep if old.get(k)}}
+        data["providers"] = {LEGACY_IDS.get(kind, "remote"): prov}
+    return data
+
+
 def load(path):
     cfg = copy.deepcopy(DEFAULTS)
     try:
@@ -57,7 +70,7 @@ def load(path):
         return cfg
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from e
-    return _merge(cfg, data)
+    return _merge(cfg, migrate(data))
 
 
 def _value(v):
@@ -80,8 +93,14 @@ def dumps(cfg):
         else:
             lines.append(f"{k} = {_value(v)}")
     for name, table in tables:
-        lines += ["", f"[{name}]"]
-        lines += [f"{k} = {_value(v)}" for k, v in table.items()]
+        subs = [(k, v) for k, v in table.items() if isinstance(v, dict)]
+        plain = [(k, v) for k, v in table.items() if not isinstance(v, dict)]
+        if plain or not subs:
+            lines += ["", f"[{name}]"]
+            lines += [f"{k} = {_value(v)}" for k, v in plain]
+        for sub, inner in subs:
+            lines += ["", f"[{name}.{sub}]"]
+            lines += [f"{k} = {_value(v)}" for k, v in inner.items() if not isinstance(v, dict)]
     return "\n".join(lines) + "\n"
 
 
@@ -117,7 +136,7 @@ def set_key(cfg, key, value):
         node = node.setdefault(part, {})
         if not isinstance(node, dict):
             raise ConfigError(f"not a table: {key}")
-    known = get_key(DEFAULTS, key) if parts[0] != "vars" else ""
+    known = get_key(DEFAULTS, key) if parts[0] not in ("vars", "providers") else ""
     if isinstance(known, bool) and not isinstance(value, bool):
         raise ConfigError(f"{key} must be true or false")
     if isinstance(known, int) and not isinstance(known, bool) and not isinstance(value, int):
