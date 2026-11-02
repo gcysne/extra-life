@@ -39,13 +39,20 @@ ensure_node() {
     node_ok || { echo "Node.js setup failed" >&2; exit 1; }
 }
 
-ensure_node
-export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 cd "$SRC"
-say "building the Decky plugin (Node.js $(node --version))"
-corepack pnpm install --frozen-lockfile --silent
-corepack pnpm run --silent typecheck
-corepack pnpm run --silent build >/dev/null
+if [[ -d "$SRC/src" ]]; then
+    ensure_node
+    export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+    say "building the Decky plugin (Node.js $(node --version))"
+    corepack pnpm install --frozen-lockfile --silent
+    corepack pnpm run --silent typecheck
+    corepack pnpm run --silent build >/dev/null
+elif [[ -f "$SRC/dist/index.js" ]]; then
+    say "using the prebuilt Decky plugin from the release package"
+else
+    echo "No plugin source (src/) and no prebuilt plugin (dist/index.js) in $SRC." >&2
+    exit 1
+fi
 
 # Stage the plugin, then copy it into place.
 STAGE="$SRC/build/extra-life"
