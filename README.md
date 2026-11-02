@@ -30,6 +30,28 @@ command and the background service work on any Linux PC.
 - Save files only. Save states are optional (off by default); keys, firmware, BIOS, DLC and updates are never
   uploaded.
 
+## Screenshots
+
+<p>
+<img src="docs/images/extra-life-panel-syncing.png" width="250" alt="Quick Access panel while a sync runs: progress bar, providers, recently saved">
+&nbsp;
+<img src="docs/images/extra-life-panel.png" width="250" alt="Quick Access panel: last sync, sync now, force push and pull">
+</p>
+
+The ♥ icon in Steam's status bar while a sync runs (it disappears when the sync ends):
+
+<img src="docs/images/extra-life-statusbar.png" width="350" alt="Status bar with the Extra Life heart icon and its progress bar">
+
+The ⚙ cog opens the full page:
+
+| Providers | Recent saves |
+|---|---|
+| <img src="docs/images/extra-life-providers.png" alt="Providers tab: connect or disconnect Google Drive, Dropbox, OneDrive, Box, pCloud, a folder, SSH or rclone"> | <img src="docs/images/extra-life-recent.png" alt="Recent saves tab"> |
+| **Emulators** | **Activity** |
+| <img src="docs/images/extra-life-emulators.png" alt="Emulators tab: per-emulator sync toggle, force push and pull"> | <img src="docs/images/extra-life-activity.png" alt="Activity tab: uploads, downloads and conflicts"> |
+| **About** | |
+| <img src="docs/images/extra-life-about.png" alt="About tab: version, update check, creator and credits"> | |
+
 ## Requirements
 
 - SteamOS 3.7+ (Steam Deck, Legion Go, ROG Ally...) or another Linux with systemd and Python 3.11+.
