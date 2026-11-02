@@ -1,0 +1,46 @@
+name: Release
+
+# Push a tag that matches the version in extralife/__init__.py and decky-plugin/package.json, e.g.:
+#   git tag v0.1.0 && git push origin v0.1.0
+# The release is published as "latest" (never as a pre-release): the plugin's update check, get-release.sh and the
+# README's download links all use GitHub's releases/latest.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rsync rclone
+          corepack enable
+      - name: Tests
+        run: python3 -m unittest discover -s tests
+      - name: Build the release assets
+        run: scripts/make-release.sh "$GITHUB_REF_NAME"
+      - name: Release notes from CHANGELOG.md
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '/^## /{p = (index($0, "## " v) == 1); next} p' CHANGELOG.md > release/notes.md
+          [ -s release/notes.md ] || echo "Extra Life $v" > release/notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "Extra Life ${GITHUB_REF_NAME#v}" \
+            --notes-file release/notes.md --latest \
+            release/extra-life.tar.gz release/get-release.sh release/SHA256SUMS

@@ -30,5 +30,12 @@ if [[ $PURGE == 1 ]]; then
     say "removing settings, sync state, local backups and the downloaded rclone"
     rm -rf "$HOME/.config/extra-life" "$HOME/.local/state/extra-life" "$HOME/.local/share/extra-life"
 else
-    echo "Kept settings (~/.config/extra-life) and local backups (~/.local/state/extra-life). Use --purge to remove them."
+    echo "Kept settings and cloud sign-ins (~/.config/extra-life) and local backups (~/.local/state/extra-life)."
+    echo "Run again with --purge to remove them too."
+fi
+say "done"
+echo "Your emulator saves were not touched. Saves already stored in your providers (the ExtraLife folder in the"
+echo "cloud, on a card or a NAS) are still there: delete that folder yourself if you don't want it any more."
+if [[ -d "$HOME/extra-life/.git" ]]; then
+    echo "The git clone ~/extra-life (if you installed with git) can be deleted now: rm -rf ~/extra-life"
 fi

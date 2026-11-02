@@ -24,7 +24,7 @@ jobs:
       - name: Byte-compile
         run: python3 -m compileall -q extralife decky-plugin/main.py
       - name: Shellcheck
-        run: shellcheck -S warning install.sh uninstall.sh decky-plugin/install.sh bin/extralife
+        run: shellcheck -S warning install.sh uninstall.sh get.sh get-release.sh scripts/make-release.sh decky-plugin/install.sh bin/extralife
 
   plugin:
     runs-on: ubuntu-latest
