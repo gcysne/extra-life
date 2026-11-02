@@ -1,0 +1,15 @@
+id = "flycast"
+name = "Flycast (Dreamcast)"
+processes = ["flycast*"]
+
+[[set]]
+id = "saves"
+note = "VMU saves and NAOMI/Atomiswave NVRAM; BIOS files in the same folder are not synced."
+paths = ["{emudeck_saves}/flycast/saves", "~/.var/app/org.flycast.Flycast/data/flycast", "~/.local/share/flycast"]
+include = ["vmu_save_*.bin", "*.nvmem", "*.nvmem2", "*.eeprom"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/flycast/states", "~/.var/app/org.flycast.Flycast/config/data/flycast"]
+include = ["*.state"]

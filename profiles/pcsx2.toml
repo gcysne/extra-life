@@ -1,0 +1,12 @@
+id = "pcsx2"
+name = "PCSX2 (PS2)"
+processes = ["pcsx2*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/pcsx2/saves", "~/.config/PCSX2/memcards", "~/.var/app/net.pcsx2.PCSX2/config/PCSX2/memcards"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/pcsx2/states", "~/.config/PCSX2/sstates", "~/.var/app/net.pcsx2.PCSX2/config/PCSX2/sstates"]

@@ -1,0 +1,9 @@
+id = "xemu"
+name = "xemu (Xbox)"
+processes = ["xemu*"]
+
+[[set]]
+id = "hdd"
+note = "Original Xbox saves live inside the virtual hard disk image; it is synced as one file."
+paths = ["{emudeck_saves}/xemu/saves", "{emudeck_storage}/xemu"]
+include = ["xbox_hdd.qcow2"]

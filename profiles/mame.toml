@@ -1,0 +1,12 @@
+id = "mame"
+name = "MAME (standalone)"
+processes = ["mame*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/MAME/saves", "~/.mame/nvram"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/MAME/states", "~/.mame/sta"]

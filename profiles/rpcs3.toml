@@ -1,0 +1,11 @@
+id = "rpcs3"
+name = "RPCS3 (PS3)"
+processes = ["rpcs3*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/rpcs3/saves", "~/.config/rpcs3/dev_hdd0/home/00000001/savedata"]
+
+[[set]]
+id = "trophies"
+paths = ["{emudeck_saves}/rpcs3/trophy", "~/.config/rpcs3/dev_hdd0/home/00000001/trophy"]

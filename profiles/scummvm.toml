@@ -1,0 +1,8 @@
+id = "scummvm"
+name = "ScummVM"
+processes = ["scummvm*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/scummvm/saves", "~/.local/share/scummvm/saves",
+         "~/.var/app/org.scummvm.ScummVM/data/scummvm/saves"]

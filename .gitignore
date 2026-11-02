@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.log
+node_modules/
+decky-plugin/dist/
+decky-plugin/build/
+CLAUDE.local.md

@@ -1,0 +1,14 @@
+id = "duckstation"
+name = "DuckStation (PS1)"
+processes = ["duckstation*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/duckstation/saves", "~/.local/share/duckstation/memcards",
+         "~/.var/app/org.duckstation.DuckStation/config/duckstation/memcards"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/duckstation/states", "~/.local/share/duckstation/savestates",
+         "~/.var/app/org.duckstation.DuckStation/config/duckstation/savestates"]

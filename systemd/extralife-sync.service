@@ -1,0 +1,11 @@
+[Unit]
+Description=Extra Life: sync save games
+Documentation=https://github.com/gcysne/extra-life
+
+[Service]
+Type=oneshot
+# Waits up to sync.wait_for_exit seconds for running emulators to close; never pulls into a running emulator.
+ExecStart=%h/.local/bin/extralife sync --quiet --lock-wait 120
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30min

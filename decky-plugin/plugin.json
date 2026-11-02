@@ -1,0 +1,11 @@
+{
+  "name": "Extra Life",
+  "author": "Gabriel Cysne",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility", "emulation", "saves"],
+    "description": "Keep emulator save games in sync with the cloud or another disk: see recent saves, force push or pull, restore older versions.",
+    "image": ""
+  }
+}

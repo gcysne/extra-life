@@ -1,0 +1,28 @@
+id = "ryujinx"
+name = "Ryujinx (Switch)"
+processes = ["ryujinx*"]
+
+# Ryujinx numbers save folders and keeps the index in a system save, so all three sets belong together.
+# Keys and firmware (system/*.keys) are never synced.
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/ryujinx/saves", "~/.config/Ryujinx/bis/user/save",
+         "~/.var/app/org.ryujinx.Ryujinx/config/Ryujinx/bis/user/save"]
+
+[[set]]
+id = "savemeta"
+paths = ["{emudeck_saves}/ryujinx/saveMeta", "~/.config/Ryujinx/bis/user/saveMeta",
+         "~/.var/app/org.ryujinx.Ryujinx/config/Ryujinx/bis/user/saveMeta"]
+
+[[set]]
+id = "system-saves"
+paths = ["{emudeck_saves}/ryujinx/system_saves", "~/.config/Ryujinx/bis/system/save",
+         "~/.var/app/org.ryujinx.Ryujinx/config/Ryujinx/bis/system/save"]
+
+[[set]]
+id = "profiles"
+note = "User profiles only (Profiles.json); keys in the same folder are excluded."
+paths = ["{emudeck_saves}/ryujinx/system", "~/.config/Ryujinx/system",
+         "~/.var/app/org.ryujinx.Ryujinx/config/Ryujinx/system"]
+include = ["Profiles.json"]

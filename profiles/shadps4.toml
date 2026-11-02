@@ -1,0 +1,7 @@
+id = "shadps4"
+name = "shadPS4 (PS4)"
+processes = ["shadps4*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/shadps4/saves", "~/.local/share/shadPS4/savedata"]

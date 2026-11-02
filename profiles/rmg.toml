@@ -1,0 +1,12 @@
+id = "rmg"
+name = "Rosalie's Mupen GUI (N64)"
+processes = ["rmg*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/RMG/saves", "~/.local/share/RMG/Save/Game"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/RMG/states", "~/.local/share/RMG/Save/State"]

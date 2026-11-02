@@ -1,0 +1,9 @@
+id = "bigpemu"
+name = "BigPEmu (Jaguar)"
+processes = ["bigpemu*"]
+
+[[set]]
+id = "saves"
+note = "Game saves in UserData; the emulator's own settings file is not synced."
+paths = ["{emudeck_saves}/BigPEmu/saves", "~/Applications/BigPEmu/UserData"]
+exclude = ["*.bigpcfg"]

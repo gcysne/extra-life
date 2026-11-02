@@ -1,0 +1,14 @@
+id = "ppsspp"
+name = "PPSSPP (PSP)"
+processes = ["ppsspp*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/ppsspp/saves", "~/.var/app/org.ppsspp.PPSSPP/config/ppsspp/PSP/SAVEDATA",
+         "~/.config/ppsspp/PSP/SAVEDATA"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/ppsspp/states", "~/.var/app/org.ppsspp.PPSSPP/config/ppsspp/PSP/PPSSPP_STATE",
+         "~/.config/ppsspp/PSP/PPSSPP_STATE"]

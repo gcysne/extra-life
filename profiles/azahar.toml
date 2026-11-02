@@ -1,0 +1,16 @@
+id = "azahar"
+name = "Azahar (3DS)"
+processes = ["azahar*", "citra*"]
+
+[[set]]
+id = "saves"
+note = "Game saves and extra data from the virtual SD card; installed titles and updates are not synced."
+paths = ["{emudeck_saves}/azahar/saves", "~/.local/share/azahar-emu/sdmc",
+         "~/.var/app/org.azahar_emu.Azahar/data/azahar-emu/sdmc"]
+include = ["Nintendo 3DS/*/*/title/*/*/data/**", "Nintendo 3DS/*/*/extdata/**"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/azahar/states", "~/.local/share/azahar-emu/states",
+         "~/.var/app/org.azahar_emu.Azahar/data/azahar-emu/states"]

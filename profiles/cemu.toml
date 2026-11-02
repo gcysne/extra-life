@@ -1,0 +1,8 @@
+id = "cemu"
+name = "Cemu (Wii U)"
+processes = ["cemu*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/Cemu/saves", "~/.local/share/Cemu/mlc01/usr/save",
+         "~/.var/app/info.cemu.Cemu/data/Cemu/mlc01/usr/save"]

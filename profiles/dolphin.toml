@@ -1,0 +1,23 @@
+id = "dolphin"
+name = "Dolphin (GameCube / Wii)"
+processes = ["dolphin-emu*"]
+
+[[set]]
+id = "gc"
+note = "GameCube memory cards (raw images and GCI folders). BIOS (IPL.bin) is never synced."
+paths = ["{emudeck_saves}/dolphin/GC", "~/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/GC",
+         "~/.local/share/dolphin-emu/GC"]
+exclude = ["IPL.bin", "dsp_*.bin", "font_*.bin"]
+
+[[set]]
+id = "wii"
+note = "Only game save data from the Wii NAND (title/*/data), not the system or installed channels."
+paths = ["{emudeck_saves}/dolphin/Wii", "~/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/Wii",
+         "~/.local/share/dolphin-emu/Wii"]
+include = ["title/00010000/*/data/**", "title/00010001/*/data/**", "title/00010004/*/data/**"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/dolphin/StateSaves", "~/.var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu/StateSaves",
+         "~/.local/share/dolphin-emu/StateSaves"]

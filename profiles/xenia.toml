@@ -1,0 +1,9 @@
+id = "xenia"
+name = "Xenia (Xbox 360)"
+processes = ["xenia*"]
+
+[[set]]
+id = "saves"
+note = "Only save data (content/<profile>/<title>/00000001); DLC and title updates are not synced."
+paths = ["{emudeck_saves}/xenia/saves", "{emudeck_roms}/xbox360/content"]
+include = ["*/*/00000001/**"]

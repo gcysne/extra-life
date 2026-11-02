@@ -1,0 +1,12 @@
+id = "mgba"
+name = "mGBA (Game Boy Advance)"
+processes = ["mgba*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/mgba/saves"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/mgba/states"]

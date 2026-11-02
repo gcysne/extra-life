@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run Extra Life from this checkout (development). install.sh writes its own copy pointing at the installed files.
+LIB="$(cd "$(dirname "$0")/.." && pwd)"
+exec python3 -s -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); from extralife.cli import main; sys.exit(main(sys.argv[1:]))' "$LIB" "$@"

@@ -1,0 +1,7 @@
+id = "vita3k"
+name = "Vita3K (PS Vita)"
+processes = ["vita3k*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/Vita3K/saves", "~/.local/share/Vita3K/Vita3K/ux0/user/00/savedata"]

@@ -1,0 +1,12 @@
+id = "melonds"
+name = "melonDS (DS)"
+processes = ["melonds*"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/melonds/saves"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/melonds/states"]

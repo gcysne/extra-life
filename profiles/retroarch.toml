@@ -1,0 +1,14 @@
+id = "retroarch"
+name = "RetroArch"
+processes = ["retroarch"]
+
+[[set]]
+id = "saves"
+paths = ["{emudeck_saves}/retroarch/saves", "~/.var/app/org.libretro.RetroArch/config/retroarch/saves",
+         "~/.config/retroarch/saves"]
+
+[[set]]
+id = "states"
+kind = "states"
+paths = ["{emudeck_saves}/retroarch/states", "~/.var/app/org.libretro.RetroArch/config/retroarch/states",
+         "~/.config/retroarch/states"]
