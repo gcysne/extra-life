@@ -49,8 +49,8 @@ The ⚙ cog opens the full page:
 | <img src="docs/images/extra-life-providers.png" alt="Providers tab: connect or disconnect Google Drive, Dropbox, OneDrive, Box, pCloud, a folder, SSH or rclone"> | <img src="docs/images/extra-life-recent.png" alt="Recent saves tab"> |
 | **Emulators** | **Activity** |
 | <img src="docs/images/extra-life-emulators.png" alt="Emulators tab: per-emulator sync toggle, force push and pull"> | <img src="docs/images/extra-life-activity.png" alt="Activity tab: uploads, downloads and conflicts"> |
-| **About** | |
-| <img src="docs/images/extra-life-about.png" alt="About tab: version, update check, creator and credits"> | |
+| **History** | **About** |
+| <img src="docs/images/extra-life-history.png" alt="History tab: older versions of every save, restore any of them"> | <img src="docs/images/extra-life-about.png" alt="About tab: version, update check, creator and credits"> |
 
 ## Requirements
 
