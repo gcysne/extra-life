@@ -223,6 +223,29 @@ class EngineTests(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertIsNone(self.b.read("g.srm"))
 
+    def test_switching_remote_never_deletes_local_saves(self):
+        self.a.write("g.srm", "v1")
+        self.ok(self.a.run())
+        self.remote = self.tmp / "remote2"            # the user points the device at a new, empty remote
+        r = self.a.run(dry_run=True)
+        self.assertEqual(r["sets"][0]["local_deleted"], [])
+        s = self.ok(self.a.run())
+        self.assertEqual(s["local_deleted"], [])
+        self.assertEqual(s["uploaded"], ["g.srm"])
+        self.assertEqual(self.a.read("g.srm"), "v1")
+        self.remote = self.tmp / "remote"             # and back: compared from scratch, same content, no change
+        s = self.ok(self.a.run())
+        self.assertEqual((s["uploaded"], s["local_deleted"], s["conflicts"]), ([], [], []))
+
+    def test_wiped_remote_manifest_never_deletes_local_saves(self):
+        self.a.write("g.srm", "v1")
+        self.ok(self.a.run())
+        shutil.rmtree(self.remote / "manifests")
+        s = self.ok(self.a.run())
+        self.assertEqual(s["local_deleted"], [])
+        self.assertEqual(s["uploaded"], ["g.srm"])
+        self.assertEqual(self.a.read("g.srm"), "v1")
+
     def test_recent_lists_newest_first(self):
         self.a.write("old.srm", "x", age=7200)
         self.a.write("new.srm", "y")

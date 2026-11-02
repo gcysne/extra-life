@@ -43,6 +43,7 @@ class Paths:
     device_file = property(lambda s: s.state_dir / "device.json")
     lock_file = property(lambda s: s.state_dir / "lock")
     prune_file = property(lambda s: s.state_dir / "last-prune.json")
+    remote_file = property(lambda s: s.state_dir / "remote.json")      # which remote the base belongs to
 
 
 @dataclass

@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -165,18 +166,40 @@ class Engine:
         except (BackendError, ValueError):
             pass
 
-    def _check_format(self):
+    def _check_format(self, dry_run=False):
+        """Check the remote's format and return its id (created on first use; older remotes get one)."""
         raw = self.backend.read_text("extra-life.json")
         if raw is None:
-            self.backend.write_text("extra-life.json", json.dumps(
-                {"app": "Extra Life", "format": REMOTE_FORMAT, "created": iso()}, indent=1) + "\n")
-            return
+            info = {"app": "Extra Life", "format": REMOTE_FORMAT, "created": iso(), "id": uuid.uuid4().hex}
+            if not dry_run:
+                self.backend.write_text("extra-life.json", json.dumps(info, indent=1) + "\n")
+            return info["id"]
         try:
-            fmt = json.loads(raw).get("format", 0)
+            info = json.loads(raw)
         except ValueError as e:
             raise EngineError("extra-life.json on the remote is damaged") from e
-        if fmt > REMOTE_FORMAT:
-            raise EngineError(f"the remote uses format {fmt}; update Extra Life on this device")
+        if info.get("format", 0) > REMOTE_FORMAT:
+            raise EngineError(f"the remote uses format {info['format']}; update Extra Life on this device")
+        if not info.get("id"):
+            info["id"] = uuid.uuid4().hex
+            if not dry_run:
+                self.backend.write_text("extra-life.json", json.dumps(info, indent=1) + "\n")
+        return info["id"]
+
+    def _bind_remote(self, remote_id, report):
+        """The base (last synced state) only means something for the remote it came from. When the remote changes,
+        archive it, so the first sync with the new remote uploads instead of reading everything as deleted."""
+        known = (read_json(self.paths.remote_file, {}) or {}).get("id")
+        if known == remote_id:
+            return
+        base = self.paths.base_dir
+        if base.is_dir() and any(base.iterdir()):
+            base.rename(base.with_name(f"base.{stamp()}-{uuid.uuid4().hex[:6]}"))
+            report.setdefault("warnings", []).append(
+                "new remote: this device's previous sync state was archived; files are compared from scratch")
+        if self.paths.conflicts_file.exists():
+            self.paths.conflicts_file.unlink()
+        write_json(self.paths.remote_file, {"id": remote_id, "remote": self.backend.describe(), "since": iso()})
 
     # ---------- state files ----------
 
@@ -226,12 +249,14 @@ class Engine:
                 sets = [s for s in sets if s.key == only_set]
                 if not sets:
                     raise EngineError(f"{only_set}: no such save folder on this device")
-            report["warnings"] = errors
+            report.setdefault("warnings", []).extend(errors)
             if wait and mode != "push":
                 self._wait_for_emulators(sets, wait)
             self.backend.check()
-            self._check_format()
+            remote_id = self._check_format(dry_run)
+            self._fresh_base = (read_json(self.paths.remote_file, {}) or {}).get("id") != remote_id
             if not dry_run:
+                self._bind_remote(remote_id, report)
                 self._remote_lock()
             try:
                 snap = f"{stamp()}_{slug(self.ctx.device.name)}"
@@ -278,7 +303,12 @@ class Engine:
             manifest_rel = f"manifests/{s.key}.json"
             mf = read_json(tmp / manifest_rel, {}) or {}
             remote = mf.get("files", {})
-            base = self.load_base(s.key)
+            base = {} if getattr(self, "_fresh_base", False) else self.load_base(s.key)
+            if not mf and base:
+                # Synced before, but the remote has no manifest for it (remote wiped or replaced): never read
+                # that as "everything was deleted"; compare from scratch instead.
+                base = {}
+                r["warning"] = "no manifest on the remote; compared from scratch"
             local = scan(s.root, s.include, s.exclude, self._cache_file(s.key))
             plan = plan_set(local, remote, base, mode, self.ctx.cfg["sync"].get("propagate_deletes", True),
                             set(only_rels) if only_rels else None)
