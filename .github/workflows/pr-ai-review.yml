@@ -5,25 +5,101 @@ name: AI security review
 # so a malicious pull request can't make it do anything; its answer only becomes a comment and this check's result.
 # It can fail on clear problems but never overrides the required PR security scan.
 #
-# Needs the repository secret CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token` with a Pro/Max plan); without it the
-# review is skipped with a note. pull_request_target: the base branch's code runs; the PR is only read as git data.
+# It uses the maintainer's Claude plan (secret CLAUDE_CODE_OAUTH_TOKEN, from `claude setup-token`), so it is rationed:
+#   - runs automatically only when a pull request is opened or marked ready, never on pushes;
+#   - after new commits, the maintainer requests another review with the `ai-review` label (only people with
+#     triage rights can add labels; the label is removed after each review);
+#   - waits 90 s and lets newer events cancel it, so bursts become one review;
+#   - skipped when the PR security scan already rejected the pull request;
+#   - at most 3 reviews per pull request and 10 per repository per 24 hours (.github/security/ai_budget.py).
+# pull_request_target: the base branch's code runs; the pull request is only read as git data.
 
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, ready_for_review, labeled]
 
 permissions:
   contents: read
   pull-requests: write
+  issues: write
+  actions: read
 
 concurrency:
   group: pr-ai-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
+  gate:
+    name: AI review budget
+    if: >-
+      ${{ !github.event.pull_request.draft &&
+          (github.event.action != 'labeled' || github.event.label.name == 'ai-review') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.budget.outputs.run }}
+      count: ${{ steps.budget.outputs.count }}
+    steps:
+      - name: Check out the base branch (trusted code)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Wait for the pushes to settle (newer events cancel this run)
+        run: sleep 90
+
+      - name: Fetch the pull request as data
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --quiet origin "+refs/pull/${PR}/head:refs/remotes/pr/head"
+          echo "MERGE_BASE=$(git merge-base "$BASE_SHA" refs/remotes/pr/head)" >> "$GITHUB_ENV"
+
+      - name: Budget
+        id: budget
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh label create "ai-review" --repo "$REPO" --color 5319E7 \
+            --description "Maintainer: request another AI security review" >/dev/null 2>&1 || true
+          # No AI when the deterministic scan already rejects the pull request.
+          if ! python3 .github/security/pr_scan.py --base "$MERGE_BASE" --head refs/remotes/pr/head \
+                 --out "$RUNNER_TEMP/scan" >/dev/null; then
+            count=$(python3 -c 'import sys; sys.path.insert(0, ".github/security"); import ai_budget; print(ai_budget.pr_count(sys.argv[1], sys.argv[2]))' "$REPO" "$PR")
+            { echo "run=false"; echo "count=$count"; echo "reason=the PR security scan already rejected this pull request."; } >> "$GITHUB_OUTPUT"
+          else
+            python3 .github/security/ai_budget.py --repo "$REPO" --pr "$PR" --out "$GITHUB_OUTPUT"
+          fi
+
+      - name: Explain a skipped review
+        if: steps.budget.outputs.run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          COUNT: ${{ steps.budget.outputs.count }}
+          REASON: ${{ steps.budget.outputs.reason }}
+        run: |
+          printf '' > "$RUNNER_TEMP/empty.diff"
+          python3 .github/security/ai_review.py --diff "$RUNNER_TEMP/empty.diff" --out "$RUNNER_TEMP/ai" \
+            --count "$COUNT" --skip "$REASON"
+          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                 -q '.[] | select(.body | contains("<!-- ai-security-review -->")) | .id' | head -1)
+          if [[ -n "$id" ]]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$RUNNER_TEMP/ai/ai-report.md" >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F "body=@$RUNNER_TEMP/ai/ai-report.md" >/dev/null
+          fi
+          gh api -X DELETE "repos/$REPO/issues/$PR/labels/ai-review" >/dev/null 2>&1 || true
+
   review:
     name: AI security review
-    if: ${{ !github.event.pull_request.draft }}
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -53,9 +129,10 @@ jobs:
         id: review
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          COUNT: ${{ needs.gate.outputs.count }}
         run: |
           set +e
-          python3 .github/security/ai_review.py --diff "$RUNNER_TEMP/pr.diff" --out "$RUNNER_TEMP/ai"
+          python3 .github/security/ai_review.py --diff "$RUNNER_TEMP/pr.diff" --out "$RUNNER_TEMP/ai" --count "$COUNT"
           echo "exit=$?" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/ai/ai-report.md" >> "$GITHUB_STEP_SUMMARY"
 
@@ -74,6 +151,7 @@ jobs:
           else
             gh api "repos/$REPO/issues/$PR/comments" -F "body=@$R/ai-report.md" >/dev/null
           fi
+          gh api -X DELETE "repos/$REPO/issues/$PR/labels/ai-review" >/dev/null 2>&1 || true
           verdict=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["review"]; print(r["verdict"] if r else "none")' "$R/ai-result.json")
           if [[ "$verdict" == block ]]; then
             gh api "repos/$REPO/pulls/$PR/reviews" -f event=REQUEST_CHANGES -f commit_id="$HEAD_SHA" \

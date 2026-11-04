@@ -54,7 +54,9 @@ Only the maintainer pushes to `main`; every other change comes as a pull request
   `.github/` or `CODEOWNERS`. Risky commands such as `rm -rf`, `sudo`, process kills or credential paths are
   reported as warnings in a review for the maintainer to check.
 - **AI security review** (advisory, `.github/security/ai_review.py`): Claude reads the diff as text, with no tools,
-  and comments on anything malicious or unsafe the pattern scan can't see.
+  and comments on anything malicious or unsafe the pattern scan can't see. It runs once when a pull request is
+  opened (not on every push, and not when the scan already rejected it); the maintainer requests another review with
+  the `ai-review` label. Limits: 3 per pull request, 10 per repository per day (`.github/security/ai_budget.py`).
 
 Needs a tool from a new source? Say so in the pull request: the maintainer decides whether it goes on the allowed
 list. False positive? Explain it in a comment; the maintainer can add the `security-reviewed` label.

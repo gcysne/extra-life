@@ -7,7 +7,7 @@ reach the network. Its answer is parsed as JSON, any secret value is scrubbed fr
 Markdown comment. It can add findings and fail its own check on "block"; it can never pass a pull request that
 pr_scan.py rejected (that check is separate and required).
 
-usage: ai_review.py --diff FILE --out DIR [--claude PATH]
+usage: ai_review.py --diff FILE --out DIR [--claude PATH] [--count N] [--skip REASON]
 Auth: CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`, Pro/Max plan) or ANTHROPIC_API_KEY in the environment.
 Exit 1 only on an AI "block" verdict; any failure of the AI itself is reported and exits 0.
 """
@@ -64,8 +64,8 @@ def run_claude(claude, diff_text, timeout=900):
     return review
 
 
-def render(review=None, error=None, skipped=None):
-    lines = [MARKER, "## 🤖 AI security review", ""]
+def render(review=None, error=None, skipped=None, count=0):
+    lines = [MARKER, f"<!-- ai-review-count: {count} -->", "## 🤖 AI security review", ""]
     if skipped:
         lines += [f"Skipped: {skipped}"]
     elif error:
@@ -93,12 +93,16 @@ def main():
     ap.add_argument("--diff", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--claude", default="claude")
+    ap.add_argument("--count", type=int, default=0, help="AI reviews this pull request already had")
+    ap.add_argument("--skip", default="", help="don't call the AI; post this reason (budget, scan rejected...)")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     diff = Path(a.diff).read_bytes()
     review, error, skipped = None, None, None
-    if not (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY")):
+    if a.skip:
+        skipped = a.skip
+    elif not (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY")):
         skipped = "no CLAUDE_CODE_OAUTH_TOKEN secret is set in this repository."
     elif len(diff) > MAX_DIFF_BYTES:
         skipped = f"the diff is {len(diff) // 1024} KB (limit {MAX_DIFF_BYTES // 1024} KB); review it by hand."
@@ -109,7 +113,8 @@ def main():
             review = run_claude(a.claude, diff.decode("utf-8", "replace"))
         except Exception as e:  # advisory layer: report, never crash the workflow
             error = str(e)
-    (out / "ai-report.md").write_text(render(review, error, skipped))
+    ran = review is not None or error is not None          # an attempt used the budget
+    (out / "ai-report.md").write_text(render(review, error, skipped, a.count + (1 if ran else 0)))
     blocked = bool(review and review["verdict"] == "block")
     (out / "ai-result.json").write_text(json.dumps({"blocked": blocked, "error": error, "skipped": skipped,
                                                     "review": review}, indent=1))
