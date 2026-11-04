@@ -1,0 +1,43 @@
+# URL prefixes (without https://) that code, scripts, skills and agent instructions may download or install from.
+# Anything else in a download/install line blocks the pull request. Official project sources only.
+# Only the maintainer can change this file: changes to .github/ are blocked in pull requests.
+
+# The project's own repositories
+github.com/gcysne/sidequest
+github.com/gcysne/extra-life
+github.com/gcysne/legion-go-guards
+raw.githubusercontent.com/gcysne/sidequest/
+raw.githubusercontent.com/gcysne/extra-life/
+raw.githubusercontent.com/gcysne/legion-go-guards/
+api.github.com/repos/
+
+# Official tool sources
+downloads.rclone.org/
+rclone.org/
+github.com/rclone/rclone/releases/
+github.com/cli/cli/releases/
+nodejs.org/dist/
+registry.npmjs.org/
+pypi.org/
+files.pythonhosted.org/
+claude.ai/install.sh
+github.com/astral-sh/uv/releases/
+github.com/ohf-voice/piper1-gpl/releases/
+huggingface.co/rhasspy/piper-voices/
+dl.flathub.org/
+flathub.org/
+
+# Decky Loader and its plugin store
+decky.xyz
+github.com/steamdeckhomebrew/
+plugins.deckbrew.xyz/
+cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/
+
+# Game metadata APIs (data, not code)
+www.steamgriddb.com/api/
+www.protondb.com/api/
+store.steampowered.com/
+
+# Local services on the device
+127.0.0.1
+localhost

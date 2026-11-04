@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Pull requests: automatic security scan (rejects binaries, prompt injection, obfuscated code, unofficial
+  downloads...; warns on risky commands) and an advisory AI security review; code owner and branch ruleset.
+
 ## 0.1.0-alpha (2026-11-03)
 
 First version.

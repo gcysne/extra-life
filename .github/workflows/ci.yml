@@ -21,10 +21,12 @@ jobs:
           sudo apt-get install -y -qq rsync rclone shellcheck
       - name: Tests (local and rclone backends)
         run: python3 -m unittest discover -s tests -v
+      - name: Security scanner tests
+        run: python3 -m unittest discover -s .github/security
       - name: Byte-compile
         run: python3 -m compileall -q extralife decky-plugin/main.py
       - name: Shellcheck
-        run: shellcheck -S warning install.sh uninstall.sh get.sh get-release.sh scripts/make-release.sh decky-plugin/install.sh bin/extralife
+        run: shellcheck -S warning .github/rulesets/apply.sh install.sh uninstall.sh get.sh get-release.sh scripts/make-release.sh decky-plugin/install.sh bin/extralife
 
   plugin:
     runs-on: ubuntu-latest

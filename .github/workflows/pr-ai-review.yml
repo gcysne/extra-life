@@ -1,0 +1,90 @@
+name: AI security review
+
+# Advisory second layer next to the PR security scan: Claude reviews the pull request's diff for malicious or unsafe
+# changes (.github/security/ai_review.py). It reads the diff as text with no tools (no files, no commands, no network),
+# so a malicious pull request can't make it do anything; its answer only becomes a comment and this check's result.
+# It can fail on clear problems but never overrides the required PR security scan.
+#
+# Needs the repository secret CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token` with a Pro/Max plan); without it the
+# review is skipped with a note. pull_request_target: the base branch's code runs; the PR is only read as git data.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: AI security review
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the base branch (trusted reviewer code)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Fetch the pull request as data and make its diff
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --quiet origin "+refs/pull/${PR}/head:refs/remotes/pr/head"
+          mb=$(git merge-base "$BASE_SHA" refs/remotes/pr/head)
+          git diff --no-color --no-ext-diff "$mb" refs/remotes/pr/head > "$RUNNER_TEMP/pr.diff"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Claude Code (official npm package, pinned)
+        run: npm install --global --no-fund --no-audit @anthropic-ai/claude-code@2.1.318
+
+      - name: Review
+        id: review
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set +e
+          python3 .github/security/ai_review.py --diff "$RUNNER_TEMP/pr.diff" --out "$RUNNER_TEMP/ai"
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/ai/ai-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report in the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          R="$RUNNER_TEMP/ai"
+          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                 -q '.[] | select(.body | contains("<!-- ai-security-review -->")) | .id' | head -1)
+          if [[ -n "$id" ]]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$R/ai-report.md" >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F "body=@$R/ai-report.md" >/dev/null
+          fi
+          verdict=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))["review"]; print(r["verdict"] if r else "none")' "$R/ai-result.json")
+          if [[ "$verdict" == block ]]; then
+            gh api "repos/$REPO/pulls/$PR/reviews" -f event=REQUEST_CHANGES -f commit_id="$HEAD_SHA" \
+              -f body="The AI security review found blocking issues: see its comment." >/dev/null || true
+          elif [[ "$verdict" == warn ]]; then
+            gh api "repos/$REPO/pulls/$PR/reviews" -f event=COMMENT -f commit_id="$HEAD_SHA" \
+              -f body="⚠️ The AI security review flagged changes a maintainer should check: see its comment." >/dev/null || true
+          fi
+
+      - name: Verdict
+        if: steps.review.outputs.exit != '0'
+        run: |
+          echo "The AI security review found blocking issues (see the job summary or its comment)."
+          exit 1

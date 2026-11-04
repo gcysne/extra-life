@@ -1,0 +1,108 @@
+name: PR security scan
+
+# Scans what a pull request adds for malicious or risky content (.github/security/pr_scan.py) and rejects it upfront
+# when it finds a blocking problem: binaries, prompt injection, hidden or obfuscated code, encoded payloads, downloads
+# from unofficial sources, dangerous shells... Risky commands (rm -rf, sudo...) are reported as warnings in a review.
+#
+# Security: pull_request_target runs with the base branch's code and a token that can comment, so this workflow
+# NEVER checks out or runs the pull request's code: it fetches its commits as git data and only reads them. The scanner
+# and its allowed-sources.txt come from the base branch, so a pull request can't change the rules it's checked with.
+# Untrusted values (titles, branch names, file contents) never go into a shell command.
+#
+# Maintainer override: add the label `security-reviewed` after reviewing a false positive, then reopen if closed.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-security-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: PR security scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the base branch (trusted scanner)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Fetch the pull request as data (never checked out or run)
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --quiet origin "+refs/pull/${PR}/head:refs/remotes/pr/head"
+          echo "MERGE_BASE=$(git merge-base "$BASE_SHA" refs/remotes/pr/head)" >> "$GITHUB_ENV"
+
+      - name: Scan
+        id: scan
+        env:
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          OVERRIDE: ${{ contains(github.event.pull_request.labels.*.name, 'security-reviewed') }}
+        run: |
+          flags=()
+          [[ "$ASSOCIATION" == OWNER ]] && flags+=(--author-is-owner)
+          [[ "$OVERRIDE" == true ]] && flags+=(--override)
+          set +e
+          python3 .github/security/pr_scan.py --base "$MERGE_BASE" --head refs/remotes/pr/head \
+            --out "$RUNNER_TEMP/scan" "${flags[@]}"
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/scan/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report in the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+        run: |
+          R="$RUNNER_TEMP/scan"
+          blocked=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["blocked"])' "$R/result.json")
+          warns=$(python3 -c 'import json,sys; print(sum(f["level"]=="WARN" for f in json.load(open(sys.argv[1]))["findings"]))' "$R/result.json")
+
+          # One comment per pull request, updated on every push.
+          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                 -q '.[] | select(.body | contains("<!-- pr-security-scan -->")) | .id' | head -1)
+          if [[ -n "$id" ]]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$R/report.md" >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F "body=@$R/report.md" >/dev/null
+          fi
+
+          gh label create "security: blocked" --repo "$REPO" --color B60205 \
+            --description "Rejected by the PR security scan" >/dev/null 2>&1 || true
+          if [[ "$blocked" == True ]]; then
+            gh api "repos/$REPO/issues/$PR/labels" -f "labels[]=security: blocked" >/dev/null
+            gh api "repos/$REPO/pulls/$PR/reviews" -f event=REQUEST_CHANGES -f commit_id="$HEAD_SHA" \
+              -f body="Rejected by the PR security scan: see the scan comment for the blocking findings." >/dev/null || true
+            if [[ "$ASSOCIATION" != OWNER ]]; then
+              gh api -X PATCH "repos/$REPO/pulls/$PR" -f state=closed >/dev/null
+            fi
+          else
+            gh api -X DELETE "repos/$REPO/issues/$PR/labels/security:%20blocked" >/dev/null 2>&1 || true
+            if [[ "$warns" != 0 ]]; then
+              # Warnings go into a review once per pushed commit.
+              done=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+                       -q "[.[] | select(.commit_id == \"$HEAD_SHA\" and .user.login == \"github-actions[bot]\")] | length")
+              if [[ "$done" == 0 ]]; then
+                gh api "repos/$REPO/pulls/$PR/reviews" -f event=COMMENT -f commit_id="$HEAD_SHA" \
+                  -f body="⚠️ The PR security scan found $warns potentially harmful command(s) (deletions, root, system changes...). They don't block the pull request, but a maintainer must review them: see the scan comment." >/dev/null || true
+              fi
+            fi
+          fi
+
+      - name: Verdict
+        if: steps.scan.outputs.exit != '0'
+        run: |
+          echo "Rejected: blocking findings (see the job summary or the scan comment)."
+          exit 1
