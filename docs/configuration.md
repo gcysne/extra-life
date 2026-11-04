@@ -31,3 +31,4 @@ The periodic sync is the systemd timer `extralife-sync.timer` (after login, then
 default** (syncs happen when a game closes): turn it on with the plugin's "Sync every 30 minutes" toggle or
 `systemctl --user enable --now extralife-sync.timer`, off with `disable --now`. Reinstalling keeps your choice. To change the
 interval: `systemctl --user edit extralife-sync.timer` and set `OnUnitActiveSec=`.
+
