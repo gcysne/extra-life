@@ -268,11 +268,12 @@ class Scan:
                     self.add("WARN", "dependency", path, 0, f"new {key} entry: {name} {spec}")
 
 
-def sanitize(text):
+def sanitize(text, limit=160):
     """Untrusted text, made safe for a Markdown table cell and for the Actions log (no workflow commands)."""
     text = HIDDEN_UNICODE.sub("␣", text).replace("\r", " ").replace("\n", " ")
     text = text.replace("::", ": :").replace("|", "\\|").replace("`", "'").replace("@", "&#64;").replace("<", "&lt;")
-    return text.strip()[:160]
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
 def report(findings, owner, override):

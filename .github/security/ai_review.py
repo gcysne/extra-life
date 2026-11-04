@@ -74,7 +74,7 @@ def render(review=None, error=None, skipped=None):
     else:
         icon = {"block": "❌ **Blocking issues found.**", "warn": "⚠️ **Needs a maintainer's look.**",
                 "pass": "✅ **Nothing suspicious found.**"}[review["verdict"]]
-        lines += [icon + " " + sanitize(scrub(str(review.get("summary", "")))), ""]
+        lines += [icon + " " + sanitize(scrub(str(review.get("summary", ""))), 600), ""]
         findings = review.get("findings") or []
         if findings:
             lines += ["| Severity | Where | Issue | Why |", "|---|---|---|---|"]
@@ -82,7 +82,7 @@ def render(review=None, error=None, skipped=None):
             for f in sorted(findings, key=lambda f: order.get(f.get("severity"), 3))[:40]:
                 where = f"`{sanitize(scrub(str(f.get('file', ''))))}`" + (f":{int(f['line'])}" if str(f.get("line", "0")).isdigit() and int(f["line"]) else "")
                 lines.append(f"| {sanitize(str(f.get('severity', '?')))} | {where} | "
-                             f"{sanitize(scrub(str(f.get('issue', ''))))} | {sanitize(scrub(str(f.get('why', ''))))} |")
+                             f"{sanitize(scrub(str(f.get('issue', ''))), 300)} | {sanitize(scrub(str(f.get('why', ''))), 400)} |")
     lines += ["", "<sub>Advisory review by Claude, which read the diff as text with no tools. It can add findings "
               "but never overrides the required PR security scan.</sub>"]
     return "\n".join(lines) + "\n"
