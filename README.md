@@ -187,6 +187,7 @@ From a terminal:
 
 ## How it works
 
+
 [docs/architecture.md](docs/architecture.md) explains the sync rules, the remote layout and what happens in every
 case (changed here, changed there, changed on both, deleted).
 
