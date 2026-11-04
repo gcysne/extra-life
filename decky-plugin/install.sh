@@ -59,7 +59,7 @@ STAGE="$SRC/build/extra-life"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/dist"
 cp plugin.json package.json main.py "$STAGE/"
-for f in LICENSE; do [[ -f "$SRC/../$f" ]] && cp "$SRC/../$f" "$STAGE/"; done
+if [[ -f "$SRC/../LICENSE" ]]; then cp "$SRC/../LICENSE" "$STAGE/"; fi
 cp dist/index.js "$STAGE/dist/"
 
 # Copy next to (not inside) the watched plugins folder, swap it in with one rename, then restart Decky:
