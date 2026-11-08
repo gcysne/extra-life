@@ -1,2 +1,6 @@
 # The maintainer owns everything and reviews every pull request (required by the branch ruleset on main).
 *       @gcysne
+
+# CI, security rules and this file: only the maintainer, even if other code owners are added above.
+# The last matching line wins in CODEOWNERS, so keep this block last.
+/.github/       @gcysne
