@@ -2,6 +2,21 @@
 
 Pull requests are welcome, especially new emulator profiles and fixes for paths on other devices or distros.
 
+> [!IMPORTANT]
+> **IF YOU OPEN AN ISSUE, ASK CLAUDE TO FIX IT, VALIDATE IT AND OPEN A PULL REQUEST TOO.**
+>
+> This project is written with [Claude Code](https://claude.com/claude-code), and you can use it the same way. In
+> your clone, give Claude the issue and ask it to:
+>
+> 1. **Fix it**: find the cause and make the smallest change that solves it.
+> 2. **Validate it**: run the checks in [Before opening a pull request](#before-opening-a-pull-request), then test
+>    the fix on your device.
+> 3. **Open a pull request** against `main` that links the issue (`Fixes #123`) and says which device and SteamOS
+>    version you tested on.
+>
+> Read the change before you submit it: you're responsible for what you send. Every pull request goes through
+> the automatic security checks and the maintainer's review ([Pull request checks](#pull-request-checks)).
+
 ## Layout
 
 | Part | Where |
