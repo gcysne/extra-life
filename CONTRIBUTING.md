@@ -49,12 +49,8 @@ shellcheck -S warning install.sh uninstall.sh decky-plugin/install.sh bin/extral
 
 ## Releases
 
-1. Set the version in `extralife/__init__.py` and `decky-plugin/package.json` (they must match) and give it a
-   section in `CHANGELOG.md` (`## <version>`: it becomes the release notes).
-2. Commit, then `git tag v<version> && git push origin v<version>`.
-3. `.github/workflows/release.yml` runs the tests, builds `extra-life.tar.gz` (with the prebuilt plugin),
-   `get-release.sh` and `SHA256SUMS` (`scripts/make-release.sh`), and publishes them as the **latest** release.
-   Never mark it as a pre-release: the update check and `releases/latest/download/...` only see the latest release.
+See [RELEASING.md](RELEASING.md): versions, tags, the alpha → beta → 1.0 plan and when to use a release
+branch.
 
 ## Pull request checks
 
