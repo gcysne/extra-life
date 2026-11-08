@@ -1,10 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Pull requests: automatic security scan (rejects binaries, prompt injection, obfuscated code, unofficial
-  downloads...; warns on risky commands) and an advisory AI security review; code owner and branch ruleset.
-
 ## 0.1.0-alpha (2026-11-03)
 
 First version.
@@ -30,3 +25,5 @@ First version.
   command and a copy button; `extralife update-check`. Releases are built by a GitHub workflow on version tags.
 - Sync progress: percentage per run (`extralife progress`), shown as a progress bar in the plugin and as an icon
   with a small progress bar in Steam's status bar while a sync runs.
+- Pull requests: automatic security scan (rejects binaries, prompt injection, obfuscated code, unofficial
+  downloads...; warns on risky commands) and an advisory AI security review; code owner and branch ruleset.
